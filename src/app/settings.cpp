@@ -38,7 +38,6 @@ sim::UserSettings LoadSettings() {
     s.windDirection =
         static_cast<sim::WindDirection>(ReadInt(path, L"WindDirection", static_cast<int>(s.windDirection)));
     s.windStrength = ReadInt(path, L"WindStrength", s.windStrength);
-    s.autoPauseFullscreen = ReadInt(path, L"AutoPauseFullscreen", s.autoPauseFullscreen ? 1 : 0) != 0;
     return sim::sanitize(s);
 }
 
@@ -48,5 +47,4 @@ void SaveSettings(const sim::UserSettings& s) {
     WriteInt(path, L"Intensity", static_cast<int>(s.intensity));
     WriteInt(path, L"WindDirection", static_cast<int>(s.windDirection));
     WriteInt(path, L"WindStrength", s.windStrength);
-    WriteInt(path, L"AutoPauseFullscreen", s.autoPauseFullscreen ? 1 : 0);
 }

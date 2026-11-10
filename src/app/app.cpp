@@ -32,7 +32,7 @@ enum TimerId : UINT_PTR {
     kTimerDisplay = 2,    // debounce display changes / resume
     kTimerRecover = 3,    // retry renderer creation after device loss
     kTimerModalTick = 4,  // keep animating while a menu/message box runs its modal loop
-    kTimerAutoPause = 5,  // poll full-screen / battery saver state
+    kTimerAutoPause = 5,  // poll battery saver state
 };
 
 enum MenuId : UINT {
@@ -47,8 +47,7 @@ enum MenuId : UINT {
     kMenuWindMedium,
     kMenuWindStrong,
     kMenuShovel = 140,
-    kMenuAutoPause = 150,
-    kMenuAutostart,
+    kMenuAutostart = 151,
     kMenuHelp = 160,
     kMenuExit = 199,
 };
@@ -241,7 +240,6 @@ void App::setPaused(unsigned reason, bool on) {
 }
 
 void App::checkAutoPause() {
-    setPaused(kPauseFullscreen, settings_.autoPauseFullscreen && IsFullscreenAppActive());
     setPaused(kPauseBattery, IsBatterySaverActive());
 }
 
@@ -251,8 +249,6 @@ void App::updateTooltip() {
         tip += L"идёт снег";
     } else if (pauseReasons_ & kPauseUser) {
         tip += L"пауза";
-    } else if (pauseReasons_ & kPauseFullscreen) {
-        tip += L"пауза: полноэкранное приложение";
     } else if (pauseReasons_ & kPauseBattery) {
         tip += L"пауза: режим энергосбережения";
     } else {
@@ -286,8 +282,7 @@ void App::showTrayMenu(POINT at) {
     HMENU wind = CreatePopupMenu();
 
     std::wstring title = L"WinFlake";
-    if (pauseReasons_ & kPauseFullscreen) title += L" — пауза (полноэкранное приложение)";
-    else if (pauseReasons_ & kPauseBattery) title += L" — пауза (энергосбережение)";
+    if (pauseReasons_ & kPauseBattery) title += L" — пауза (энергосбережение)";
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, title.c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
@@ -318,8 +313,6 @@ void App::showTrayMenu(POINT at) {
 
     AppendMenuW(menu, MF_STRING, kMenuShovel, L"Лопата: убрать весь снег");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING | (settings_.autoPauseFullscreen ? MF_CHECKED : 0u), kMenuAutoPause,
-                L"Пауза в полноэкранных приложениях");
     AppendMenuW(menu, MF_STRING | (IsAutostartEnabled() ? MF_CHECKED : 0u), kMenuAutostart,
                 L"Запускать вместе с Windows");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -358,10 +351,6 @@ void App::showTrayMenu(POINT at) {
             world_.clear();
             framePending_ = true;
             settingsChanged = false;
-            break;
-        case kMenuAutoPause:
-            settings_.autoPauseFullscreen = !settings_.autoPauseFullscreen;
-            checkAutoPause();
             break;
         case kMenuAutostart:
             SetAutostart(!IsAutostartEnabled());
