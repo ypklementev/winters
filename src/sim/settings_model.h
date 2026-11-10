@@ -31,25 +31,25 @@ inline SnowConfig toSnowConfig(const UserSettings& in) {
     // piles grow ~1 / 2.5 / 6 px per minute in the open.
     switch (s.intensity) {
         case Intensity::Light:
-            c.spawnRate = 40.0f;
+            c.spawnRate = 50.0f;
             c.maxFlakes = 6000;
             c.gustiness = 0.25f;
             c.turbulence = 10.0f;
-            c.flakeMass = 0.26f;
+            c.flakeMass = 0.3f;
             break;
         case Intensity::Steady:
-            c.spawnRate = 110.0f;
+            c.spawnRate = 140.0f;
             c.maxFlakes = 16000;
             c.gustiness = 0.35f;
             c.turbulence = 14.0f;
-            c.flakeMass = 0.24f;
+            c.flakeMass = 0.28f;
             break;
         case Intensity::Blizzard:
-            c.spawnRate = 330.0f;
+            c.spawnRate = 380.0f;
             c.maxFlakes = 40000;
             c.gustiness = 0.6f;
             c.turbulence = 30.0f;
-            c.flakeMass = 0.19f;
+            c.flakeMass = 0.24f;
             break;
     }
     static constexpr float kStrength[] = {0.0f, 25.0f, 60.0f, 120.0f};

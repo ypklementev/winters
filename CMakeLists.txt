@@ -34,6 +34,10 @@ add_library(winflake_sim STATIC
 )
 target_include_directories(winflake_sim PUBLIC src)
 
+# Procedural flake sprite atlas: pure C++ too, so it is tested on any host.
+add_library(winflake_atlas STATIC src/render/flake_atlas.cpp)
+target_link_libraries(winflake_atlas PUBLIC winflake_sim)
+
 # ---------------------------------------------------------------------------
 # WinFlake.exe (Windows only: MSVC or MinGW cross-compile)
 # ---------------------------------------------------------------------------
@@ -57,6 +61,7 @@ if(WIN32)
     )
     target_link_libraries(WinFlake PRIVATE
         winflake_sim
+        winflake_atlas
         d3d11 dxgi dcomp dwmapi shcore user32 gdi32 shell32 ole32 uuid advapi32 wtsapi32
     )
     target_compile_definitions(WinFlake PRIVATE
@@ -84,8 +89,9 @@ if(WINFLAKE_BUILD_TESTS)
         tests/test_world_piles.cpp
         tests/test_mitten_snowballs.cpp
         tests/test_settings.cpp
+        tests/test_atlas.cpp
     )
-    target_link_libraries(sim_tests PRIVATE winflake_sim)
+    target_link_libraries(sim_tests PRIVATE winflake_atlas)
     target_include_directories(sim_tests PRIVATE tests)
     if(MINGW)
         target_link_options(sim_tests PRIVATE -static)

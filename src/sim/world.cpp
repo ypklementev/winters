@@ -17,7 +17,7 @@ constexpr float kAverageFall = 42.0f;          // for prewarm density
 constexpr float kCullSlack = 64.0f;
 constexpr float kCullAbove = 300.0f;           // updrafts may lift flakes this far above the top
 constexpr std::size_t kDebrisReserve = 15000;  // pool room for collapse/sweep/erosion debris
-constexpr float kBigFlakeChance = 0.06f;       // share of large crystals/plates/clumps
+constexpr float kBigFlakeChance = 0.045f;      // share of large near crystals/plates/clumps
 
 // --- lying snow ------------------------------------------------------------
 constexpr float kCellWidth = 2.0f;     // px per height-map cell
@@ -275,11 +275,11 @@ FlakeSpawn World::makeFlake(float x, float y, float scale) {
     float r;  // logical radius
     FlakeShape shape;
     if (big) {
-        r = rng_.uniform(2.0f, 3.8f);
+        r = rng_.uniform(3.0f, 6.0f);
         const float pick = rng_.uniform();
         shape = pick < 0.45f ? FlakeShape::Crystal : pick < 0.7f ? FlakeShape::Plate : FlakeShape::Clump;
     } else {
-        r = (0.45f + 1.05f * z) * rng_.uniform(0.8f, 1.25f);
+        r = (0.6f + 1.2f * z) * rng_.uniform(0.8f, 1.25f);
         shape = r > 1.3f && rng_.uniform() < 0.35f ? FlakeShape::Clump : FlakeShape::Speck;
     }
     const float depthSpeed = 0.65f + 0.45f * z;
@@ -294,9 +294,9 @@ FlakeSpawn World::makeFlake(float x, float y, float scale) {
     f.angle = rng_.uniform(0.0f, 2.0f * kPi);
     f.spin = rng_.uniform(-1.6f, 1.6f);
     f.tumbles = flat;
-    f.alpha = 0.45f + 0.5f * z;
+    f.alpha = big ? 0.95f : 0.6f + 0.4f * z;
     f.scale = scale;
-    f.mass = cfg_.flakeMass * r * r * scale * scale;
+    f.mass = cfg_.flakeMass * std::min(r * r, 4.0f) * scale * scale;
     f.sprite = static_cast<std::uint16_t>(spriteIndex(shape, rng_.next()));
     f.pos = {x, y};
     f.vel = {windNow_ * scale, f.fallSpeed};

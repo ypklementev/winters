@@ -15,8 +15,13 @@ namespace sim {
 class World;
 }
 
-struct DiscInstance {
+struct FlakeInstance {
     float x, y, radius, alpha;
+    float angle, squash, sprite, gain;
+};
+
+struct BallInstance {
+    float x, y, radius, angle;
 };
 
 struct PileInstance {
@@ -43,20 +48,25 @@ private:
     };
 
     HRESULT createPipeline();
+    HRESULT createAtlas();
     // Grows (if needed) and fills a dynamic vertex buffer.
     HRESULT upload(DynamicBuffer& b, const void* data, size_t bytes);
     void buildInstances(const sim::World& world);
 
     GpuContext gpu_;
-    ComPtr<ID3D11VertexShader> discVs_, pileVs_;
+    ComPtr<ID3D11VertexShader> flakeVs_, ballVs_, pileVs_;
     ComPtr<ID3D11PixelShader> flakePs_, ballPs_, pilePs_;
-    ComPtr<ID3D11InputLayout> discLayout_, pileLayout_;
+    ComPtr<ID3D11InputLayout> flakeLayout_, ballLayout_, pileLayout_;
+    ComPtr<ID3D11ShaderResourceView> atlas_;
+    ComPtr<ID3D11SamplerState> sampler_;
     ComPtr<ID3D11Buffer> constants_;
     ComPtr<ID3D11BlendState> blend_;
     ComPtr<ID3D11RasterizerState> raster_;
     DynamicBuffer flakeBuf_, ballBuf_, pileBuf_;
 
-    std::vector<DiscInstance> flakes_;
-    std::vector<DiscInstance> balls_;
+    std::vector<FlakeInstance> flakes_;
+    std::vector<BallInstance> balls_;
+    LARGE_INTEGER startTime_{};
+    LARGE_INTEGER qpcFreq_{};
     std::vector<PileInstance> piles_;
 };
