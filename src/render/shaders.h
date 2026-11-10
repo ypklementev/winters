@@ -178,6 +178,51 @@ float4 ps_pile(PileOut i) : SV_Target {
     col = lerp(col, float3(1.0, 1.0, 1.0), glint);
     return float4(saturate(col) * coverage, coverage);
 }
+
+// ---------------------------------------------------------------------------
+// Solid capsules (the wiper): a = (centre.x, centre.y, halfLength, halfWidth),
+// b = (angle, r, g, b), c = (alpha, shine, 0, 0). Rounded ends, AA edges.
+// ---------------------------------------------------------------------------
+struct ShapeIn {
+    float4 a : SHAPE0;
+    float4 b : SHAPE1;
+    float4 c : SHAPE2;
+    uint vid : SV_VertexID;
+};
+
+struct ShapeOut {
+    float4 pos : SV_Position;
+    float2 local : TEXCOORD0;  // px in the capsule's own frame
+    float2 size : TEXCOORD1;   // (halfLength, halfWidth)
+    float4 color : TEXCOORD2;
+    float shine : TEXCOORD3;
+};
+
+ShapeOut vs_shape(ShapeIn i) {
+    float2 corner = float2((i.vid & 1) ? 1.0 : -1.0, (i.vid & 2) ? 1.0 : -1.0);
+    float2 local = corner * (i.a.zw + 1.0);
+    float s, c;
+    sincos(i.b.x, s, c);
+    ShapeOut o;
+    o.pos = toClip(i.a.xy + float2(local.x * c - local.y * s, local.x * s + local.y * c));
+    o.local = local;
+    o.size = i.a.zw;
+    o.color = float4(i.b.yzw, i.c.x);
+    o.shine = i.c.y;
+    return o;
+}
+
+float4 ps_shape(ShapeOut i) : SV_Target {
+    float r = i.size.y;
+    float2 q = float2(max(abs(i.local.x) - (i.size.x - r), 0.0), i.local.y);
+    float d = length(q) - r;
+    float coverage = saturate(0.5 - d) * i.color.a;
+    // Cylindrical highlight across the width (metal / rubber sheen).
+    float across = i.local.y / max(r, 0.001);
+    float sheen = pow(saturate(1.0 - abs(across + 0.35)), 3.0) * i.shine;
+    float3 col = i.color.rgb * (1.0 - 0.35 * abs(across)) + sheen;
+    return float4(saturate(col) * coverage, coverage);
+}
 )hlsl";
 
 }  // namespace shaders

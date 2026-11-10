@@ -30,6 +30,7 @@ add_library(winflake_sim STATIC
     src/sim/surfaces.cpp
     src/sim/snowballs.cpp
     src/sim/wind.cpp
+    src/sim/wiper.cpp
     src/sim/world.cpp
 )
 target_include_directories(winflake_sim PUBLIC src)
@@ -90,6 +91,7 @@ if(WINFLAKE_BUILD_TESTS)
         tests/test_mitten_snowballs.cpp
         tests/test_settings.cpp
         tests/test_atlas.cpp
+        tests/test_wiper_plow.cpp
     )
     target_link_libraries(sim_tests PRIVATE winflake_atlas)
     target_include_directories(sim_tests PRIVATE tests)

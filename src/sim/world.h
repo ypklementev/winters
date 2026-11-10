@@ -12,6 +12,7 @@
 #include "sim/surfaces.h"
 #include "sim/types.h"
 #include "sim/wind.h"
+#include "sim/wiper.h"
 
 namespace sim {
 
@@ -34,9 +35,12 @@ struct PointerInput {
     bool valid = false;
     Vec2 pos;              // overlay space
     Vec2 vel;              // px/s, smoothed by the caller
-    bool sculpt = false;   // sculpt modifier held (Ctrl+Alt)
-    bool pressed = false;  // left button down
+    bool sculpt = false;   // sculpt modifier held (Ctrl+Alt): make balls from snow
+    bool pressed = false;  // primary button down
 };
+
+// What is under the cursor that the user can grab with the mouse.
+enum class HitKind { None, Snowball, WiperPivot };
 
 class World {
 public:
@@ -68,6 +72,21 @@ public:
     float time() const { return time_; }
     float currentWind() const { return windNow_; }
     bool holdingSnowball() const;
+    // A snowball or the wiper is being dragged.
+    bool holdingSomething() const { return holdingSnowball() || wiperHeld_; }
+    HitKind hitTest(Vec2 p) const;
+
+    // --- wiper ----------------------------------------------------------------
+    void setWiperEnabled(bool on) { wiper_.setEnabled(on); }
+    // Puts the pivot at p (clamped to the screens); arm length follows the monitor size.
+    void placeWiper(Vec2 p);
+    const Wiper& wiper() const { return wiper_; }
+    // True once after the user finished dragging the wiper (to persist it).
+    bool takeWiperMoved() {
+        const bool m = wiperMoved_;
+        wiperMoved_ = false;
+        return m;
+    }
 
     // Total snow lying on surfaces, px^2 (for tests/diagnostics).
     float lyingArea() const;
@@ -97,7 +116,9 @@ private:
     void relaxPiles();
     void erodePiles(float dt);
     void applyMitten();
-    void updateSculpt();
+    void plowIntoBall(float mass, Vec2 cursor, float scale);
+    void updateGrab();
+    void stepWiper(float dt);
     void growHeld(Snowball& b, float movedX);
     void stepBalls(float dt);
     // heldPointerY: for a dragged ball, the cursor y. Surfaces the cursor has
@@ -124,6 +145,12 @@ private:
     bool havePrevPointer_ = false;
     bool wasPressed_ = false;
     float mittenCarry_ = 0.0f;
+    float plowCarry_ = 0.0f;  // snow pushed by the cursor, not yet a ball
+    float lastPlowTime_ = -1.0f;
+
+    Wiper wiper_;
+    bool wiperHeld_ = false;
+    bool wiperMoved_ = false;
 
     std::vector<Snowball> balls_;
 };

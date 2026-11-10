@@ -18,6 +18,7 @@ struct Snowball {
     bool held = false;     // being dragged by the cursor (infinite mass)
     bool contact = false;  // touched ground or another ball this step
     float stillTime = 0.0f;
+    float pushedAt = -1.0f;  // world time the cursor last pushed it
 };
 
 // Ball-ball collision resolution. Near-vertical contacts are treated as

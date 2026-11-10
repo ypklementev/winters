@@ -48,7 +48,7 @@ TEST(mitten_sweeps_snow_off_the_edge) {
     World w = snowyWindow(1);
     REQUIRE(pileHeightNear(w, 1, 600) > 3.0f);
     const std::size_t flakesBefore = w.flakes().size();
-    movePointer(w, {300, 295}, {900, 295}, 0.5f, false, false);
+    movePointer(w, {300, 295}, {900, 295}, 0.2f, false, false);  // quick flick: 3000 px/s
     CHECK(pileHeightNear(w, 1, 600) < 0.5f);
     CHECK(pileHeightNear(w, 1, 1050) > 1.0f);  // outside the path: untouched
     CHECK(w.flakes().size() > flakesBefore);

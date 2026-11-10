@@ -68,6 +68,10 @@ void Renderer::shutdown() {
     flakeBuf_ = {};
     ballBuf_ = {};
     pileBuf_ = {};
+    shapeBuf_ = {};
+    shapeLayout_.reset();
+    shapeVs_.reset();
+    shapePs_.reset();
     constants_.reset();
     flakeLayout_.reset();
     ballLayout_.reset();
@@ -88,7 +92,7 @@ void Renderer::shutdown() {
 HRESULT Renderer::createPipeline() {
     ID3D11Device* dev = gpu_.device();
     // Shader model 4.0 also runs on feature level 10_x hardware.
-    ComPtr<ID3DBlob> flakeVs, ballVs, pileVs, flakePs, ballPs, pilePs;
+    ComPtr<ID3DBlob> flakeVs, ballVs, pileVs, shapeVs, flakePs, ballPs, pilePs, shapePs;
     HRESULT hr;
     if (FAILED(hr = compile("vs_flake", "vs_4_0", flakeVs))) return hr;
     if (FAILED(hr = compile("vs_ball", "vs_4_0", ballVs))) return hr;
@@ -96,6 +100,8 @@ HRESULT Renderer::createPipeline() {
     if (FAILED(hr = compile("ps_flake", "ps_4_0", flakePs))) return hr;
     if (FAILED(hr = compile("ps_ball", "ps_4_0", ballPs))) return hr;
     if (FAILED(hr = compile("ps_pile", "ps_4_0", pilePs))) return hr;
+    if (FAILED(hr = compile("vs_shape", "vs_4_0", shapeVs))) return hr;
+    if (FAILED(hr = compile("ps_shape", "ps_4_0", shapePs))) return hr;
 
     auto vs = [&](ComPtr<ID3DBlob>& b, ComPtr<ID3D11VertexShader>& out) {
         return dev->CreateVertexShader(b->GetBufferPointer(), b->GetBufferSize(), nullptr, out.put());
@@ -109,6 +115,16 @@ HRESULT Renderer::createPipeline() {
     if (FAILED(hr = ps(flakePs, flakePs_))) return hr;
     if (FAILED(hr = ps(ballPs, ballPs_))) return hr;
     if (FAILED(hr = ps(pilePs, pilePs_))) return hr;
+    if (FAILED(hr = vs(shapeVs, shapeVs_))) return hr;
+    if (FAILED(hr = ps(shapePs, shapePs_))) return hr;
+    const D3D11_INPUT_ELEMENT_DESC shapeElems[] = {
+        {"SHAPE", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D11_INPUT_PER_INSTANCE_DATA, 1},
+        {"SHAPE", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D11_INPUT_PER_INSTANCE_DATA, 1},
+        {"SHAPE", 2, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D11_INPUT_PER_INSTANCE_DATA, 1},
+    };
+    hr = dev->CreateInputLayout(shapeElems, ARRAYSIZE(shapeElems), shapeVs->GetBufferPointer(),
+                                shapeVs->GetBufferSize(), shapeLayout_.put());
+    if (FAILED(hr)) return hr;
 
     const D3D11_INPUT_ELEMENT_DESC flakeElems[] = {
         {"FLAKE", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D11_INPUT_PER_INSTANCE_DATA, 1},
@@ -253,6 +269,30 @@ void Renderer::buildInstances(const sim::World& world) {
             piles_.push_back({x0, x0 + cw, s.edgeY(), 0.0f, hl, hr});
         }
     }
+
+    // The wiper: arm, blade holder, rubber blade and the pivot cap.
+    shapes_.clear();
+    const sim::Wiper& wp = world.wiper();
+    if (wp.enabled()) {
+        const float sc = wp.scale();
+        const sim::Vec2 pv = wp.pivot();
+        const sim::Vec2 tip = wp.tip();
+        const sim::Vec2 bladeStart = wp.bladeStart();
+        const float screenAngle = -wp.angle();  // direction (cos a, -sin a)
+        auto capsule = [&](sim::Vec2 a, sim::Vec2 b, float halfWidth, float r, float g, float bl, float shine) {
+            const float half = sim::length(b - a) * 0.5f + halfWidth;
+            shapes_.push_back({(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f, half, halfWidth, screenAngle, r, g, bl,
+                               1.0f, shine, 0.0f, 0.0f});
+        };
+        // Blade holder sits slightly offset from the arm, like on a car.
+        const sim::Vec2 n = sim::Vec2{-std::sin(wp.angle()), -std::cos(wp.angle())} * (3.0f * sc);
+        capsule(bladeStart + n, tip + n, 2.0f * sc, 0.16f, 0.17f, 0.19f, 0.35f);   // holder
+        capsule(bladeStart, tip, wp.bladeHalfWidth(), 0.05f, 0.05f, 0.06f, 0.18f);  // rubber
+        capsule(pv, tip, 2.6f * sc, 0.13f, 0.14f, 0.16f, 0.45f);                    // arm
+        const float pr = wp.pivotRadius();
+        shapes_.push_back({pv.x, pv.y, pr * 0.75f, pr * 0.75f, 0.0f, 0.2f, 0.21f, 0.24f, 1.0f, 0.5f, 0.0f, 0.0f});
+        shapes_.push_back({pv.x, pv.y, pr * 0.32f, pr * 0.32f, 0.0f, 0.08f, 0.08f, 0.09f, 1.0f, 0.2f, 0.0f, 0.0f});
+    }
 }
 
 Renderer::Result Renderer::render(const sim::World& world) {
@@ -265,6 +305,7 @@ Renderer::Result Renderer::render(const sim::World& world) {
     if (FAILED(hr = upload(pileBuf_, piles_.data(), piles_.size() * sizeof(PileInstance)))) return fail(hr);
     if (FAILED(hr = upload(ballBuf_, balls_.data(), balls_.size() * sizeof(BallInstance)))) return fail(hr);
     if (FAILED(hr = upload(flakeBuf_, flakes_.data(), flakes_.size() * sizeof(FlakeInstance)))) return fail(hr);
+    if (FAILED(hr = upload(shapeBuf_, shapes_.data(), shapes_.size() * sizeof(ShapeInstance)))) return fail(hr);
 
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
@@ -308,6 +349,7 @@ Renderer::Result Renderer::render(const sim::World& world) {
     };
     draw(pileBuf_, sizeof(PileInstance), piles_.size(), pileLayout_.get(), pileVs_.get(), pilePs_.get());
     draw(ballBuf_, sizeof(BallInstance), balls_.size(), ballLayout_.get(), ballVs_.get(), ballPs_.get());
+    draw(shapeBuf_, sizeof(ShapeInstance), shapes_.size(), shapeLayout_.get(), shapeVs_.get(), shapePs_.get());
     draw(flakeBuf_, sizeof(FlakeInstance), flakes_.size(), flakeLayout_.get(), flakeVs_.get(), flakePs_.get());
 
     hr = gpu_.present();

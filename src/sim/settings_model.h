@@ -15,6 +15,10 @@ struct UserSettings {
     Intensity intensity = Intensity::Steady;
     WindDirection windDirection = WindDirection::Calm;
     int windStrength = 2;  // 1 weak, 2 medium, 3 strong
+    bool wiper = false;
+    bool wiperPlaced = false;  // user moved it: wiperX/Y are valid
+    int wiperX = 0;            // pivot, physical screen px
+    int wiperY = 0;
 };
 
 inline UserSettings sanitize(UserSettings s) {

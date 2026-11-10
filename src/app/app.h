@@ -49,6 +49,8 @@ private:
     void updateTooltip();
 
     void applySettings();
+    // Puts the wiper at its saved place (or the default) and applies on/off.
+    void placeWiper();
     void showTrayMenu(POINT at);
     void showHelp();
 
