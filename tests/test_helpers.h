@@ -45,6 +45,7 @@ inline void heavySnow(sim::World& w) {
     sim::SnowConfig cfg;
     cfg.spawnRate = 400.0f;
     cfg.maxFlakes = 20000;
+    cfg.flakeMass = 1.5f;
     w.setConfig(cfg);
 }
 

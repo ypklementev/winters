@@ -29,6 +29,7 @@ add_library(winflake_sim STATIC
     src/sim/heightmap.cpp
     src/sim/surfaces.cpp
     src/sim/snowballs.cpp
+    src/sim/wind.cpp
     src/sim/world.cpp
 )
 target_include_directories(winflake_sim PUBLIC src)

@@ -15,7 +15,6 @@ struct UserSettings {
     Intensity intensity = Intensity::Steady;
     WindDirection windDirection = WindDirection::Calm;
     int windStrength = 2;  // 1 weak, 2 medium, 3 strong
-    bool autoPauseFullscreen = true;
 };
 
 inline UserSettings sanitize(UserSettings s) {
@@ -28,21 +27,29 @@ inline UserSettings sanitize(UserSettings s) {
 inline SnowConfig toSnowConfig(const UserSettings& in) {
     const UserSettings s = sanitize(in);
     SnowConfig c;
+    // spawnRate: flakes/s per 1000 logical px of width. flakeMass is tuned so
+    // piles grow ~1 / 2.5 / 6 px per minute in the open.
     switch (s.intensity) {
         case Intensity::Light:
-            c.spawnRate = 7.0f;
-            c.maxFlakes = 3000;
+            c.spawnRate = 40.0f;
+            c.maxFlakes = 6000;
             c.gustiness = 0.25f;
+            c.turbulence = 10.0f;
+            c.flakeMass = 0.26f;
             break;
         case Intensity::Steady:
-            c.spawnRate = 18.0f;
-            c.maxFlakes = 6000;
+            c.spawnRate = 110.0f;
+            c.maxFlakes = 16000;
             c.gustiness = 0.35f;
+            c.turbulence = 14.0f;
+            c.flakeMass = 0.24f;
             break;
         case Intensity::Blizzard:
-            c.spawnRate = 55.0f;
-            c.maxFlakes = 12000;
+            c.spawnRate = 330.0f;
+            c.maxFlakes = 40000;
             c.gustiness = 0.6f;
+            c.turbulence = 30.0f;
+            c.flakeMass = 0.19f;
             break;
     }
     static constexpr float kStrength[] = {0.0f, 25.0f, 60.0f, 120.0f};

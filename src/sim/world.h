@@ -11,17 +11,23 @@
 #include "sim/snowballs.h"
 #include "sim/surfaces.h"
 #include "sim/types.h"
+#include "sim/wind.h"
 
 namespace sim {
 
 struct SnowConfig {
     // Flakes spawned per second per 1000 logical (DPI-independent) px of width.
-    float spawnRate = 12.0f;
-    std::size_t maxFlakes = 6000;
+    float spawnRate = 110.0f;
+    std::size_t maxFlakes = 16000;
     // Horizontal wind, logical px/s (positive = to the right).
     float wind = 0.0f;
     // 0..1: how much the wind varies over time.
     float gustiness = 0.35f;
+    // Eddy speed of the air, logical px/s (on top of the wind).
+    float turbulence = 14.0f;
+    // Snow (px^2, logical) a typical 1 px flake leaves when it lands; sets how
+    // fast piles grow independently of how many particles are drawn.
+    float flakeMass = 0.4f;
 };
 
 struct PointerInput {
@@ -68,12 +74,15 @@ public:
 
 private:
     FlakeSpawn makeFlake(float x, float y, float scale);
-    void addDebris(float x, float y, Vec2 vel, float area, float scale);
+    // A clump knocked off a pile; `mass` px^2 of snow is conserved.
+    void addDebris(float x, float y, Vec2 vel, float mass, float scale);
     bool spawnRoom() const { return flakes_.size() < cfg_.maxFlakes; }
     void spawn(float dt);
     void cull();
-    float floorAt(float x) const;
-    float windMargin() const;
+    void rebuildFloors();
+    float exactFloor(float x) const;
+    // Off the sides, far above, or below the screen bottom in its column.
+    bool outOfWorld(float x, float y, float r) const;
     float averageScale() const;
     float scaleAt(Vec2 p) const;
     float computeWind() const;
@@ -86,6 +95,7 @@ private:
 
     void landFlakes();
     void relaxPiles();
+    void erodePiles(float dt);
     void applyMitten();
     void updateSculpt();
     void growHeld(Snowball& b, float movedX);
@@ -101,6 +111,8 @@ private:
     Rng rng_;
     float time_ = 0.0f;
     float windNow_ = 0.0f;
+    WindField air_;
+    std::vector<float> floors_;  // lowest screen bottom per column bucket
 
     // Window surfaces in z-order (topmost first), followed by screen bottoms.
     std::vector<Surface> surfaces_;

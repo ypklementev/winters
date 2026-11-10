@@ -13,6 +13,7 @@ struct Snowball {
     Vec2 vel;
     Vec2 prevPos;
     float radius = 5.0f;
+    float angle = 0.0f;    // rolling rotation, for the renderer
     float scale = 1.0f;
     bool held = false;     // being dragged by the cursor (infinite mass)
     bool contact = false;  // touched ground or another ball this step

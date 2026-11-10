@@ -44,8 +44,10 @@ struct Surface {
     bool taskbar = false;
     float scale = 1.0f;
     Heightmap pile;
-    float spillCarry = 0.0f;  // spilled area not yet turned into particles
-    bool settled = true;      // no relaxation needed until something changes
+    float spillCarry = 0.0f;    // spilled area not yet turned into particles
+    float erosionCarry = 0.0f;  // wind-blown area not yet turned into particles
+    float lastSeen = 0.0f;      // world time of the last setWindows() that saw it
+    bool settled = true;        // no relaxation needed until something changes
 
     float edgeY() const { return rect.top; }
     // Y of the snow top at screen x, or kNoSurface if nothing can lie there.
@@ -63,7 +65,12 @@ struct Surface {
 class SurfaceIndex {
 public:
     void build(const std::vector<Surface>& surfaces, const RectF& bounds);
-    const std::vector<std::uint32_t>& at(float x) const;
+    const std::vector<std::uint32_t>& at(float x) const {
+        if (buckets_.empty()) return empty_;
+        const float f = (x - origin_) * kInvBucket;
+        if (f < 0.0f || f >= static_cast<float>(buckets_.size())) return empty_;
+        return buckets_[static_cast<std::size_t>(f)];
+    }
     // Calls fn(surfaceIndex) once for every surface overlapping [x0, x1].
     template <class Fn>
     void forRange(float x0, float x1, Fn&& fn) const {
@@ -84,6 +91,7 @@ private:
     int bucketOf(float x) const;
 
     static constexpr float kBucketWidth = 64.0f;
+    static constexpr float kInvBucket = 1.0f / kBucketWidth;
     float origin_ = 0.0f;
     std::vector<std::vector<std::uint32_t>> buckets_;
     std::vector<std::uint32_t> empty_;
