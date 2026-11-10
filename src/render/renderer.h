@@ -27,7 +27,7 @@ struct BallInstance {
 struct ShapeInstance {
     float cx, cy, halfLength, halfWidth;
     float angle, r, g, b;
-    float alpha, shine, pad0, pad1;
+    float alpha, shine, type, pad;  // type: 0 capsule, 1 triangle, 2 trapezoid
 };
 
 struct PileInstance {

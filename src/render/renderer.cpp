@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "render/flake_atlas.h"
+#include "render/shapes.h"
 #include "render/shaders.h"
 #include "sim/world.h"
 
@@ -270,28 +271,11 @@ void Renderer::buildInstances(const sim::World& world) {
         }
     }
 
-    // The wiper: arm, blade holder, rubber blade and the pivot cap.
+    // Wiper and snowman decorations (built in pure C++, see render/shapes.cpp).
     shapes_.clear();
-    const sim::Wiper& wp = world.wiper();
-    if (wp.enabled()) {
-        const float sc = wp.scale();
-        const sim::Vec2 pv = wp.pivot();
-        const sim::Vec2 tip = wp.tip();
-        const sim::Vec2 bladeStart = wp.bladeStart();
-        const float screenAngle = -wp.angle();  // direction (cos a, -sin a)
-        auto capsule = [&](sim::Vec2 a, sim::Vec2 b, float halfWidth, float r, float g, float bl, float shine) {
-            const float half = sim::length(b - a) * 0.5f + halfWidth;
-            shapes_.push_back({(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f, half, halfWidth, screenAngle, r, g, bl,
-                               1.0f, shine, 0.0f, 0.0f});
-        };
-        // Blade holder sits slightly offset from the arm, like on a car.
-        const sim::Vec2 n = sim::Vec2{-std::sin(wp.angle()), -std::cos(wp.angle())} * (3.0f * sc);
-        capsule(bladeStart + n, tip + n, 2.0f * sc, 0.16f, 0.17f, 0.19f, 0.35f);   // holder
-        capsule(bladeStart, tip, wp.bladeHalfWidth(), 0.05f, 0.05f, 0.06f, 0.18f);  // rubber
-        capsule(pv, tip, 2.6f * sc, 0.13f, 0.14f, 0.16f, 0.45f);                    // arm
-        const float pr = wp.pivotRadius();
-        shapes_.push_back({pv.x, pv.y, pr * 0.75f, pr * 0.75f, 0.0f, 0.2f, 0.21f, 0.24f, 1.0f, 0.5f, 0.0f, 0.0f});
-        shapes_.push_back({pv.x, pv.y, pr * 0.32f, pr * 0.32f, 0.0f, 0.08f, 0.08f, 0.09f, 1.0f, 0.2f, 0.0f, 0.0f});
+    for (const shapes::Shape& sh : shapes::Build(world)) {
+        shapes_.push_back({sh.cx, sh.cy, sh.halfLength, sh.halfWidth, sh.angle, sh.r, sh.g, sh.b, sh.alpha, sh.shine,
+                           static_cast<float>(sh.type), 0.0f});
     }
 }
 

@@ -69,6 +69,8 @@ public:
     const FlakePool& flakes() const { return flakes_; }
     const std::vector<Surface>& surfaces() const { return surfaces_; }
     const std::vector<Snowball>& snowballs() const { return balls_; }
+    // Complete snowmen (indices into snowballs()), refreshed every step.
+    const std::vector<Snowman>& snowmen() const { return snowmen_; }
     float time() const { return time_; }
     float currentWind() const { return windNow_; }
     bool holdingSnowball() const;
@@ -121,6 +123,12 @@ private:
     void stepWiper(float dt);
     void growHeld(Snowball& b, float movedX);
     void stepBalls(float dt);
+    Snowball& addBall(Snowball b);   // assigns an id, enforces the ball limit
+    void removeBall(std::size_t i);  // anything stuck on it falls free
+    void followParents();            // stuck balls ride along with their parent
+    void stickResting(float dt);     // balls resting on top of another stick to it
+    void shatter(std::size_t i);
+    bool isAncestor(std::uint32_t maybeAncestor, const Snowball& b) const;
     // heldPointerY: for a dragged ball, the cursor y. Surfaces the cursor has
     // been pulled well below are passed through (lets you lift a ball off a ledge).
     void collideBallWithSurfaces(Snowball& b, float dt, float heldPointerY = kNoSurface);
@@ -153,6 +161,8 @@ private:
     bool wiperMoved_ = false;
 
     std::vector<Snowball> balls_;
+    std::vector<Snowman> snowmen_;
+    std::uint32_t nextBallId_ = 1;
 };
 
 }  // namespace sim

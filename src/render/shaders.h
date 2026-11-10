@@ -180,8 +180,10 @@ float4 ps_pile(PileOut i) : SV_Target {
 }
 
 // ---------------------------------------------------------------------------
-// Solid capsules (the wiper): a = (centre.x, centre.y, halfLength, halfWidth),
-// b = (angle, r, g, b), c = (alpha, shine, 0, 0). Rounded ends, AA edges.
+// Solid shapes (wiper, snowman decorations):
+// a = (centre.x, centre.y, halfLength, halfWidth), b = (angle, r, g, b),
+// c = (alpha, shine, type, 0). type 0 = capsule, 1 = triangle pointing +x
+// (carrot), 2 = trapezoid narrower at the top (bucket). AA via signed distance.
 // ---------------------------------------------------------------------------
 struct ShapeIn {
     float4 a : SHAPE0;
@@ -192,10 +194,10 @@ struct ShapeIn {
 
 struct ShapeOut {
     float4 pos : SV_Position;
-    float2 local : TEXCOORD0;  // px in the capsule's own frame
+    float2 local : TEXCOORD0;  // px in the shape's own frame
     float2 size : TEXCOORD1;   // (halfLength, halfWidth)
     float4 color : TEXCOORD2;
-    float shine : TEXCOORD3;
+    float2 style : TEXCOORD3;  // (shine, type)
 };
 
 ShapeOut vs_shape(ShapeIn i) {
@@ -208,19 +210,41 @@ ShapeOut vs_shape(ShapeIn i) {
     o.local = local;
     o.size = i.a.zw;
     o.color = float4(i.b.yzw, i.c.x);
-    o.shine = i.c.y;
+    o.style = i.c.yz;
     return o;
 }
 
+float edgeDist(float2 p, float2 a, float2 n) { return dot(p - a, normalize(n)); }
+
 float4 ps_shape(ShapeOut i) : SV_Target {
-    float r = i.size.y;
-    float2 q = float2(max(abs(i.local.x) - (i.size.x - r), 0.0), i.local.y);
-    float d = length(q) - r;
+    float2 p = i.local;
+    float hl = i.size.x, hw = i.size.y;
+    float d;
+    float3 col = i.color.rgb;
+    if (i.style.y < 0.5) {
+        // Capsule with a cylindrical sheen across its width.
+        float2 q = float2(max(abs(p.x) - (hl - hw), 0.0), p.y);
+        d = length(q) - hw;
+        float across = p.y / max(hw, 0.001);
+        float sheen = pow(saturate(1.0 - abs(across + 0.35)), 3.0) * i.style.x;
+        col = col * (1.0 - 0.35 * abs(across)) + sheen;
+    } else if (i.style.y < 1.5) {
+        // Triangle: base at x = -hl, apex at x = +hl. Carrot ridges.
+        d = max(-hl - p.x, max(edgeDist(p, float2(-hl, -hw), float2(hw, -2.0 * hl)),
+                               edgeDist(p, float2(-hl, hw), float2(hw, 2.0 * hl))));
+        float ridge = step(0.55, frac((p.x + hl) / max(hl * 0.28, 1.0)));
+        col *= (0.88 + 0.12 * ridge) * (1.0 - 0.25 * saturate(p.y / max(hw, 0.001)));
+    } else {
+        // Trapezoid: bottom half-width hl, top 0.78 hl, height 2 hw. Metal bucket.
+        float t = 0.78 * hl;
+        d = max(max(p.y - hw, -hw - p.y),
+                max(edgeDist(p, float2(hl, hw), float2(2.0 * hw, -(hl - t))),
+                    edgeDist(p, float2(-hl, hw), float2(-2.0 * hw, -(hl - t)))));
+        float across = p.x / max(hl, 0.001);
+        float sheen = pow(saturate(1.0 - abs(across + 0.4) * 2.2), 2.0) * i.style.x;
+        col = col * (0.8 + 0.25 * (1.0 - abs(across))) + sheen;
+    }
     float coverage = saturate(0.5 - d) * i.color.a;
-    // Cylindrical highlight across the width (metal / rubber sheen).
-    float across = i.local.y / max(r, 0.001);
-    float sheen = pow(saturate(1.0 - abs(across + 0.35)), 3.0) * i.shine;
-    float3 col = i.color.rgb * (1.0 - 0.35 * abs(across)) + sheen;
     return float4(saturate(col) * coverage, coverage);
 }
 )hlsl";

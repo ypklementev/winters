@@ -44,7 +44,8 @@ constexpr float kMittenMaxJump = 400.0f;  // longer moves are teleports, not swe
 constexpr float kWakeReach = 3.5f;        // air wake radius, in mitten radii
 constexpr float kWakeStrength = 0.35f;
 constexpr float kFlingSpeed = 1400.0f;    // faster swipes fling snow; slower ones push it into a ball
-constexpr float kPlowStartMass = 33.0f;   // pushed snow needed before a ball appears
+constexpr float kPlowStartMass = 65.0f;   // pushed snow needed before a ball appears
+constexpr float kKickSpeed = 900.0f;      // without Ctrl+Alt only a swipe this fast knocks a ball
 constexpr float kPlowForget = 0.6f;       // s without pushing before gathered snow is dropped
 constexpr float kPushMemory = 0.3f;       // s a ball counts as "being pushed"
 
@@ -60,6 +61,10 @@ constexpr float kBallGrow = 1.5f;  // area gained per area of snow rolled up
 constexpr float kBallBite = 0.3f;  // snow depth picked up per px rolled
 constexpr std::size_t kMaxBalls = 40;
 constexpr float kBallMaxThrow = 2500.0f;
+constexpr float kShatterSpeed = 900.0f;   // impact speed that breaks a ball (~220 px drop)
+constexpr float kStickDelay = 0.15f;      // s a ball must rest on another before sticking
+constexpr float kStickSpeed = 40.0f;      // max relative speed to count as resting
+constexpr float kChunkMinRadius = 14.0f;  // bigger balls also break into a couple of chunks
 
 // Visual size of a clump carrying `mass` px^2 of snow.
 float debrisRadius(float mass, float scale) {
@@ -576,38 +581,51 @@ void World::erodePiles(float dt) {
 // ============================================================================
 
 void World::applyMitten() {
-    if (!pointer_.valid || pointer_.sculpt || holdingSomething()) return;
+    if (!pointer_.valid || holdingSomething()) return;
     if (time_ - lastPlowTime_ > kPlowForget) plowCarry_ = 0.0f;
+    // Two hands: normally the cursor brushes snow off and leaves snowballs
+    // alone (so they can be hovered and grabbed); with Ctrl+Alt it's a plow
+    // that pushes snow into balls and shoves balls around.
+    const bool plowMode = pointer_.sculpt;
     const Vec2 b = pointer_.pos;
     Vec2 a = havePrevPointer_ ? prevPointer_ : b;
     const float scale = scaleAt(b);
     const float R = kMittenRadius * scale;
-
-    // The hand is solid for snowballs: they are pushed out of its way.
-    for (Snowball& ball : balls_) {
-        if (ball.held) continue;
-        const Vec2 off = ball.pos - b;
-        const float dist = length(off);
-        const float minD = R + ball.radius;
-        if (dist >= minD || dist < 1e-3f) continue;
-        const Vec2 n = off * (1.0f / dist);
-        ball.pos = b + n * minD;
-        const float vn = dot(pointer_.vel - ball.vel, n);
-        if (vn > 0.0f) ball.vel = ball.vel + n * vn;
-        ball.pushedAt = time_;
-        ball.stillTime = 0.0f;
-    }
-
     const float speed = length(pointer_.vel);
-    if (speed < kMittenMinSpeed * scale) return;
     if (length(b - a) > kMittenMaxJump * scale) a = b;
-
     const Vec2 seg = b - a;
     const float segLen2 = dot(seg, seg);
     auto distToSeg = [&](Vec2 p) {
         const float t = segLen2 > 0.0f ? std::clamp(dot(p - a, seg) / segLen2, 0.0f, 1.0f) : 0.0f;
         return length(p - (a + seg * t));
     };
+
+    for (Snowball& ball : balls_) {
+        if (ball.held) continue;
+        if (plowMode) {
+            // Solid pusher (only while moving, so a ball just let go of isn't
+            // shoved away by the resting cursor). Stacks are pushed by their base.
+            if (ball.parent != 0 || speed < kMittenMinSpeed * scale) continue;
+            const Vec2 off = ball.pos - b;
+            const float dist = length(off);
+            const float minD = R + ball.radius;
+            if (dist >= minD || dist < 1e-3f) continue;
+            const Vec2 n = off * (1.0f / dist);
+            ball.pos = b + n * minD;
+            const float vn = dot(pointer_.vel - ball.vel, n);
+            if (vn > 0.0f) ball.vel = ball.vel + n * vn;
+        } else {
+            // Only a real swipe through a ball knocks it (and off a stack).
+            if (speed < kKickSpeed * scale || distToSeg(ball.pos) > R + ball.radius) continue;
+            ball.parent = 0;
+            const float k = std::clamp(12.0f * scale / ball.radius, 0.05f, 0.6f);
+            ball.vel = ball.vel + (pointer_.vel - ball.vel) * k;
+        }
+        ball.pushedAt = time_;
+        ball.stillTime = 0.0f;
+    }
+
+    if (speed < kMittenMinSpeed * scale) return;
 
     // The moving hand drags the air: flakes nearby are pulled into its wake,
     // ones it actually hits are flung.
@@ -632,7 +650,8 @@ void World::applyMitten() {
 
     // Lying snow inside the swept capsule is knocked off. A quick flick (or a
     // mostly vertical swipe) throws it; an unhurried push gathers it into a ball.
-    const bool fling = speed > kFlingSpeed * scale || std::abs(pointer_.vel.y) > std::abs(pointer_.vel.x) * 1.5f;
+    const bool fling = !plowMode || speed > kFlingSpeed * scale ||
+                       std::abs(pointer_.vel.y) > std::abs(pointer_.vel.x) * 1.5f;
     float gathered = 0.0f;
     const float x0 = std::min(a.x, b.x) - R;
     const float x1 = std::max(a.x, b.x) + R;
@@ -723,8 +742,7 @@ void World::plowIntoBall(float mass, Vec2 cursor, float scale) {
     ball.pos = ball.prevPos = {x, y};
     ball.vel = {pointer_.vel.x, 0.0f};
     ball.pushedAt = time_;
-    if (balls_.size() >= kMaxBalls) balls_.erase(balls_.begin());
-    balls_.push_back(ball);
+    addBall(ball);
     plowCarry_ = 0.0f;
 }
 
@@ -762,6 +780,8 @@ void World::updateGrab() {
                     }
                 }
                 heldIt->held = true;
+                heldIt->parent = 0;  // taking a ball off a stack unsticks it
+                heldIt->settleOn = 0;
                 break;
             }
             case HitKind::WiperPivot:
@@ -782,14 +802,13 @@ void World::updateGrab() {
                     }
                 }
                 if (onSnow) {
-                    if (balls_.size() >= kMaxBalls) balls_.erase(balls_.begin());
                     Snowball b;
                     b.radius = kBallStartRadius * scale;
                     b.scale = scale;
                     b.pos = b.prevPos = p;
                     b.held = true;
-                    balls_.push_back(b);
-                    heldIt = balls_.end() - 1;
+                    const std::uint32_t id = addBall(b).id;
+                    heldIt = balls_.begin() + findBall(balls_, id);
                 }
                 break;
             }
@@ -935,6 +954,7 @@ void World::stepWiper(float dt) {
     // Snowballs get batted away.
     for (Snowball& b : balls_) {
         if (b.held || !wiper_.swept(b.pos, b.radius)) continue;
+        b.parent = 0;
         b.pos = b.prevPos = pushAhead(b.pos, b.radius);
         b.vel = flingAt(b.pos) * 0.9f;
         b.stillTime = 0.0f;
@@ -997,17 +1017,144 @@ void World::collideBallWithSurfaces(Snowball& b, float dt, float heldPointerY) {
     b.pos.y = bestReq;
     b.contact = true;
     if (heldPointerY != kNoSurface) return;  // dragged: just ride on top
+    b.impactSpeed = std::max(b.impactSpeed, b.vel.y);
     if (b.vel.y > 0.0f) b.vel.y = b.vel.y > 150.0f * b.scale ? -b.vel.y * 0.15f : 0.0f;
     b.vel.x *= std::exp(-4.0f * dt);
     // Resting on a corner only: roll off towards the unsupported side.
     if (std::abs(bestDx) > 0.3f * r) b.vel.x -= (bestDx > 0.0f ? 1.0f : -1.0f) * kGravity * b.scale * 0.35f * dt;
 }
 
+Snowball& World::addBall(Snowball b) {
+    if (balls_.size() >= kMaxBalls) {
+        // Drop the oldest ball that isn't part of something (or just the oldest).
+        std::size_t victim = 0;
+        for (std::size_t k = 0; k < balls_.size(); ++k) {
+            const bool hasChild = std::any_of(balls_.begin(), balls_.end(),
+                                              [&](const Snowball& o) { return o.parent == balls_[k].id; });
+            if (!balls_[k].held && balls_[k].parent == 0 && !hasChild) {
+                victim = k;
+                break;
+            }
+        }
+        removeBall(victim);
+    }
+    b.id = nextBallId_++;
+    balls_.push_back(b);
+    return balls_.back();
+}
+
+void World::removeBall(std::size_t i) {
+    const std::uint32_t id = balls_[i].id;
+    for (Snowball& o : balls_) {
+        if (o.parent == id) o.parent = 0;
+    }
+    balls_.erase(balls_.begin() + static_cast<std::ptrdiff_t>(i));
+}
+
+bool World::isAncestor(std::uint32_t maybeAncestor, const Snowball& b) const {
+    std::uint32_t p = b.parent;
+    for (int guard = 0; p != 0 && guard < 64; ++guard) {
+        if (p == maybeAncestor) return true;
+        const int k = findBall(balls_, p);
+        if (k < 0) break;
+        p = balls_[static_cast<std::size_t>(k)].parent;
+    }
+    return false;
+}
+
+void World::followParents() {
+    // Parents before children: a few passes cover any realistic stack height.
+    for (int pass = 0; pass < 4; ++pass) {
+        for (Snowball& b : balls_) {
+            if (b.parent == 0 || b.held) continue;
+            const int k = findBall(balls_, b.parent);
+            if (k < 0) {
+                b.parent = 0;  // parent is gone: fall free
+                continue;
+            }
+            const Snowball& p = balls_[static_cast<std::size_t>(k)];
+            b.prevPos = b.pos;
+            b.pos = p.pos + b.offset;
+            b.vel = p.vel;
+        }
+    }
+}
+
+void World::stickResting(float dt) {
+    for (Snowball& a : balls_) {
+        if (a.held || a.parent != 0) continue;
+        std::uint32_t on = 0;
+        for (const Snowball& b : balls_) {
+            if (&a == &b || b.held || isAncestor(a.id, b)) continue;
+            const float dist = length(a.pos - b.pos);
+            if (dist > a.radius + b.radius + 1.5f * a.scale) continue;
+            if (a.pos.y >= b.pos.y || std::abs(a.pos.x - b.pos.x) > b.radius * 0.6f) continue;
+            if (length(a.vel - b.vel) > kStickSpeed * a.scale) continue;
+            on = b.id;
+            break;
+        }
+        if (on == 0) {
+            a.settleOn = 0;
+            a.settleTime = 0.0f;
+            continue;
+        }
+        if (a.settleOn != on) {
+            a.settleOn = on;
+            a.settleTime = 0.0f;
+        }
+        a.settleTime += dt;
+        if (a.settleTime < kStickDelay) continue;
+        const Snowball& b = balls_[static_cast<std::size_t>(findBall(balls_, on))];
+        const Vec2 d = a.pos - b.pos;
+        const float len = std::max(length(d), 1e-3f);
+        a.parent = on;
+        a.offset = d * ((a.radius + b.radius) / len);  // snug contact
+        a.pos = b.pos + a.offset;
+        a.vel = b.vel;
+        a.settleOn = 0;
+    }
+}
+
+void World::shatter(std::size_t i) {
+    const Snowball b = balls_[i];
+    removeBall(i);
+    const float s = b.scale;
+    float mass = kPi * b.radius * b.radius / kBallGrow;  // the snow it was rolled from
+
+    // A big ball breaks into a couple of chunks plus a spray of snow.
+    if (b.radius > kChunkMinRadius * s) {
+        for (int k = 0; k < 2; ++k) {
+            const float dir = k == 0 ? -1.0f : 1.0f;
+            Snowball c;
+            c.scale = s;
+            c.radius = b.radius * rng_.uniform(0.32f, 0.42f);
+            c.pos = c.prevPos = b.pos + Vec2{dir * b.radius * 0.35f, -b.radius * 0.2f};
+            c.vel = Vec2{dir * rng_.uniform(120.0f, 260.0f), -rng_.uniform(150.0f, 300.0f)} * s + Vec2{b.vel.x * 0.3f, 0.0f};
+            mass -= kPi * c.radius * c.radius / kBallGrow;
+            addBall(c);
+        }
+    }
+    if (mass <= 0.0f) return;
+    const float unit = std::max(1.2f * s * s, mass / 400.0f);
+    for (float m = mass; m > 0.0f; m -= unit) {
+        const float ang = rng_.uniform(0.0f, 2.0f * kPi);
+        const float rr = std::sqrt(rng_.uniform()) * b.radius;
+        const Vec2 dir{std::cos(ang), std::sin(ang)};
+        const Vec2 p = b.pos + dir * rr;
+        const Vec2 v = dir * (rng_.uniform(60.0f, 260.0f) * s) + Vec2{b.vel.x * 0.2f, -rng_.uniform(40.0f, 200.0f) * s};
+        addDebris(p.x, p.y, v, std::min(unit, m), s);
+    }
+}
+
 void World::stepBalls(float dt) {
-    if (balls_.empty()) return;
+    if (balls_.empty()) {
+        snowmen_.clear();
+        return;
+    }
     for (Snowball& b : balls_) {
         b.contact = false;
-        if (b.held) continue;
+        b.impactSpeed = 0.0f;
+        if (b.kinematic()) continue;
         b.prevPos = b.pos;
         b.vel.y += kGravity * b.scale * dt;
         b.vel = b.vel * std::exp(-0.3f * dt);
@@ -1015,21 +1162,30 @@ void World::stepBalls(float dt) {
     }
     for (int round = 0; round < 2; ++round) {
         for (Snowball& b : balls_) {
-            if (!b.held) collideBallWithSurfaces(b, dt);
+            if (!b.kinematic()) collideBallWithSurfaces(b, dt);
         }
+        followParents();
         resolveBallContacts(balls_, 3);
     }
+    followParents();
+    stickResting(dt);
+
     for (std::size_t i = 0; i < balls_.size();) {
         Snowball& b = balls_[i];
+        // A hard landing (dropped from high, thrown, hit by the wiper) breaks it.
+        if (!b.kinematic() && b.impactSpeed > kShatterSpeed * b.scale) {
+            shatter(i);
+            continue;
+        }
         // Rolling: angle follows horizontal travel (for the renderer's texture),
         // and a ball rolling over snow picks it up.
         if (b.held) {
             b.angle += (b.pos.x - b.prevPos.x) / b.radius;
-        } else if (b.contact) {
+        } else if (b.contact && b.parent == 0) {
             b.angle += b.vel.x * dt / b.radius;
             if (std::abs(b.vel.x) > 5.0f * b.scale) growHeld(b, std::abs(b.vel.x) * dt);
         }
-        if (!b.held) {
+        if (!b.kinematic()) {
             if (b.pos.x - b.radius < bounds_.left) {
                 b.pos.x = bounds_.left + b.radius;
                 b.vel.x = std::abs(b.vel.x) * 0.3f;
@@ -1044,11 +1200,21 @@ void World::stepBalls(float dt) {
                 b.stillTime = 0.0f;
             }
             if (b.pos.y - b.radius > bounds_.bottom) {
-                balls_.erase(balls_.begin() + static_cast<std::ptrdiff_t>(i));
+                removeBall(i);
                 continue;
             }
         }
         ++i;
+    }
+
+    // Snowmen: a fresh one gets its hat, nose and eyes (timestamp drives the
+    // renderer's pop-in animation).
+    snowmen_ = findSnowmen(balls_);
+    for (Snowball& b : balls_) {
+        const bool head = std::any_of(snowmen_.begin(), snowmen_.end(),
+                                      [&](const Snowman& m) { return &balls_[m.head] == &b; });
+        if (!head) b.decoratedAt = -1.0f;
+        else if (b.decoratedAt < 0.0f) b.decoratedAt = time_;
     }
 }
 
@@ -1082,6 +1248,7 @@ void World::clear() {
         s.settled = true;
     }
     balls_.clear();
+    snowmen_.clear();
     mittenCarry_ = 0.0f;
     plowCarry_ = 0.0f;
     wiperHeld_ = false;

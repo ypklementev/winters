@@ -36,7 +36,7 @@ add_library(winflake_sim STATIC
 target_include_directories(winflake_sim PUBLIC src)
 
 # Procedural flake sprite atlas: pure C++ too, so it is tested on any host.
-add_library(winflake_atlas STATIC src/render/flake_atlas.cpp)
+add_library(winflake_atlas STATIC src/render/flake_atlas.cpp src/render/shapes.cpp)
 target_link_libraries(winflake_atlas PUBLIC winflake_sim)
 
 # ---------------------------------------------------------------------------
