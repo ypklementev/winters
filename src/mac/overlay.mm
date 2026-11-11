@@ -110,6 +110,18 @@
     _panel.level = CGWindowLevelForKey(kCGDockWindowLevelKey) - 1;
     _panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary |
                                 NSWindowCollectionBehaviorIgnoresCycle | NSWindowCollectionBehaviorFullScreenAuxiliary;
+    // Experiment hooks (Space-switch behaviour can only be checked by eye):
+    //   defaults write <bundle id> DebugOverlayLevel -int <level>
+    //   defaults write <bundle id> DebugOverlayBehavior -int <NSWindowCollectionBehavior bits>
+    NSUserDefaults* defaults = NSUserDefaults.standardUserDefaults;
+    if (id level = [defaults objectForKey:@"DebugOverlayLevel"]) _panel.level = [level integerValue];
+    if (id behavior = [defaults objectForKey:@"DebugOverlayBehavior"]) {
+        @try {
+            _panel.collectionBehavior = static_cast<NSWindowCollectionBehavior>([behavior unsignedIntegerValue]);
+        } @catch (NSException* e) {
+            NSLog(@"WinTers: DebugOverlayBehavior %@ rejected: %@", behavior, e.reason);
+        }
+    }
     _clickThrough = YES;
 
     _view = [[WTOverlayView alloc] initWithFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height)];
