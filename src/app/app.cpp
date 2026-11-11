@@ -32,7 +32,7 @@ enum TimerId : UINT_PTR {
     kTimerDisplay = 2,    // debounce display changes / resume
     kTimerRecover = 3,    // retry renderer creation after device loss
     kTimerModalTick = 4,  // keep animating while a menu/message box runs its modal loop
-    kTimerAutoPause = 5,  // poll full-screen / battery saver state
+    kTimerAutoPause = 5,  // poll battery saver state
 };
 
 enum MenuId : UINT {
@@ -47,8 +47,9 @@ enum MenuId : UINT {
     kMenuWindMedium,
     kMenuWindStrong,
     kMenuShovel = 140,
-    kMenuAutoPause = 150,
-    kMenuAutostart,
+    kMenuWiper = 145,
+    kMenuUnlimited = 146,
+    kMenuAutostart = 151,
     kMenuHelp = 160,
     kMenuExit = 199,
 };
@@ -111,6 +112,7 @@ HRESULT App::rebuildDisplays() {
     }
     world_.setMonitors(std::move(monitors));
     updateWindows(true);
+    placeWiper();
     if (!prewarmed_) {
         world_.prewarm();
         prewarmed_ = true;
@@ -153,8 +155,13 @@ void App::updateWindows(bool force) {
 
 void App::updatePointer(double elapsed) {
     const PointerSample s = SamplePointer();
-    // While Ctrl+Alt is held the overlay takes mouse input (sculpt mode).
-    overlay_.setClickThrough(!s.sculptKeys);
+    const sim::Vec2 local{static_cast<float>(s.pos.x - virtualRect_.left), static_cast<float>(s.pos.y - virtualRect_.top)};
+    // The overlay takes mouse input only where there is something to grab
+    // (a snowball, the wiper's pivot), while dragging it, or in sculpt mode
+    // (Ctrl+Alt). Everywhere else clicks go to the windows underneath. A press
+    // that started elsewhere (e.g. dragging a window over a ball) isn't stolen.
+    const bool overGrabbable = s.valid && !s.primaryButton && world_.hitTest(local) != sim::HitKind::None;
+    overlay_.setClickThrough(!(s.sculptKeys || world_.holdingSomething() || overGrabbable));
 
     sim::PointerInput p;
     p.valid = s.valid;
@@ -166,7 +173,7 @@ void App::updatePointer(double elapsed) {
         }
         lastCursor_ = s.pos;
         haveCursor_ = true;
-        p.pos = {static_cast<float>(s.pos.x - virtualRect_.left), static_cast<float>(s.pos.y - virtualRect_.top)};
+        p.pos = local;
         p.vel = cursorVel_;
         p.sculpt = s.sculptKeys;
         p.pressed = s.primaryButton;
@@ -202,7 +209,30 @@ void App::tick() {
         framePending_ = false;
         if (renderer_.render(world_) != Renderer::Result::Ok) onDeviceLost();
     }
+    if (world_.takeWiperMoved()) {
+        const sim::Vec2 pv = world_.wiper().pivot();
+        settings_.wiperPlaced = true;
+        settings_.wiperX = static_cast<int>(pv.x) + virtualRect_.left;
+        settings_.wiperY = static_cast<int>(pv.y) + virtualRect_.top;
+        SaveSettings(settings_);
+    }
     scheduleNextTick();
+}
+
+void App::placeWiper() {
+    POINT at{settings_.wiperX, settings_.wiperY};
+    // A saved position that is no longer on any monitor falls back to the default.
+    if (!settings_.wiperPlaced || !MonitorFromPoint(at, MONITOR_DEFAULTTONULL)) {
+        HMONITOR primary = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY);
+        MONITORINFO mi{};
+        mi.cbSize = sizeof(mi);
+        GetMonitorInfoW(primary, &mi);
+        const float scale = static_cast<float>(GetDpiForWindow(control_)) / 96.0f;
+        // Bottom centre of the primary work area, cap fully visible above the taskbar.
+        at = {(mi.rcWork.left + mi.rcWork.right) / 2, mi.rcWork.bottom - static_cast<LONG>(16.0f * scale)};
+    }
+    world_.placeWiper({static_cast<float>(at.x - virtualRect_.left), static_cast<float>(at.y - virtualRect_.top)});
+    world_.setWiperEnabled(settings_.wiper);
 }
 
 void App::scheduleNextTick() {
@@ -241,7 +271,6 @@ void App::setPaused(unsigned reason, bool on) {
 }
 
 void App::checkAutoPause() {
-    setPaused(kPauseFullscreen, settings_.autoPauseFullscreen && IsFullscreenAppActive());
     setPaused(kPauseBattery, IsBatterySaverActive());
 }
 
@@ -251,8 +280,6 @@ void App::updateTooltip() {
         tip += L"идёт снег";
     } else if (pauseReasons_ & kPauseUser) {
         tip += L"пауза";
-    } else if (pauseReasons_ & kPauseFullscreen) {
-        tip += L"пауза: полноэкранное приложение";
     } else if (pauseReasons_ & kPauseBattery) {
         tip += L"пауза: режим энергосбережения";
     } else {
@@ -269,11 +296,16 @@ void App::showHelp() {
     SetTimer(control_, kTimerModalTick, 15, nullptr);
     MessageBoxW(nullptr,
                 L"Снег падает и копится на верхних краях окон, на панели задач и внизу экрана.\n\n"
-                L"• Смахнуть снег — быстро проведите курсором по сугробу.\n\n"
-                L"• Слепить снежок — зажмите Ctrl + левый Alt, нажмите левой кнопкой мыши на сугроб "
-                L"и, не отпуская, катите снежок по снегу: он будет расти. Отпустите кнопку — снежок упадёт. "
-                L"Ставьте снежки друг на друга — получится снеговик. Готовый снежок можно взять снова.\n\n"
-                L"• Пока зажаты Ctrl + Alt, клики попадают в снег, а не в окна.\n\n"
+                L"• Смахнуть снег — проведите курсором по сугробу (быстрый взмах сбивает и снежки).\n\n"
+                L"• Снежный ком — зажмите Ctrl + левый Alt и ведите курсор вдоль сугроба: снег сгребается "
+                L"в шарик, который катится перед курсором и растёт. Можно и нажать на сугроб с Ctrl + Alt "
+                L"и катить снежок мышкой.\n\n"
+                L"• Снеговик — наведите курсор на шарик (появится рука), возьмите и поставьте на другой или вплотную рядом: "
+                L"шары слипаются, лепить можно сколько угодно шаров. Три шара от большого к маленькому — и снеговик получит ведро, морковку и глаза. "
+                L"За нижний шар можно унести весь снеговик.\n\n"
+                L"• Шар, брошенный или упавший с высоты, разбивается.\n\n"
+                L"• «Снегопад → Без ограничений» — сугробы растут хоть до верха экрана.\n\n"
+                L"• Дворник (в меню) смахивает снег. Его ось можно перетащить мышкой.\n\n"
                 L"• Ctrl + Alt + S — пауза / продолжить.\n\n"
                 L"• «Лопата» в меню убирает весь снег.",
                 L"WinFlake — как пользоваться", MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
@@ -286,8 +318,7 @@ void App::showTrayMenu(POINT at) {
     HMENU wind = CreatePopupMenu();
 
     std::wstring title = L"WinFlake";
-    if (pauseReasons_ & kPauseFullscreen) title += L" — пауза (полноэкранное приложение)";
-    else if (pauseReasons_ & kPauseBattery) title += L" — пауза (энергосбережение)";
+    if (pauseReasons_ & kPauseBattery) title += L" — пауза (энергосбережение)";
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, title.c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
@@ -300,6 +331,9 @@ void App::showTrayMenu(POINT at) {
     AppendMenuW(snow, MF_STRING, kMenuBlizzard, L"Метель");
     CheckMenuRadioItem(snow, kMenuLight, kMenuBlizzard, kMenuLight + static_cast<UINT>(settings_.intensity),
                        MF_BYCOMMAND);
+    AppendMenuW(snow, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(snow, MF_STRING | (settings_.unlimited ? MF_CHECKED : 0u), kMenuUnlimited,
+                L"Без ограничений (сугробы до верха экрана)");
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(snow), L"Снегопад");
 
     AppendMenuW(wind, MF_STRING, kMenuWindCalm, L"Штиль");
@@ -316,14 +350,13 @@ void App::showTrayMenu(POINT at) {
                        kMenuWindWeak + static_cast<UINT>(settings_.windStrength - 1), MF_BYCOMMAND);
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(wind), L"Ветер");
 
+    AppendMenuW(menu, MF_STRING | (settings_.wiper ? MF_CHECKED : 0u), kMenuWiper, L"Дворник");
     AppendMenuW(menu, MF_STRING, kMenuShovel, L"Лопата: убрать весь снег");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING | (settings_.autoPauseFullscreen ? MF_CHECKED : 0u), kMenuAutoPause,
-                L"Пауза в полноэкранных приложениях");
     AppendMenuW(menu, MF_STRING | (IsAutostartEnabled() ? MF_CHECKED : 0u), kMenuAutostart,
                 L"Запускать вместе с Windows");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kMenuHelp, L"Как лепить снежки…");
+    AppendMenuW(menu, MF_STRING, kMenuHelp, L"Как пользоваться…");
     AppendMenuW(menu, MF_STRING, kMenuExit, L"Выход");
 
     // Required so the menu closes when the user clicks elsewhere.
@@ -359,9 +392,12 @@ void App::showTrayMenu(POINT at) {
             framePending_ = true;
             settingsChanged = false;
             break;
-        case kMenuAutoPause:
-            settings_.autoPauseFullscreen = !settings_.autoPauseFullscreen;
-            checkAutoPause();
+        case kMenuUnlimited:
+            settings_.unlimited = !settings_.unlimited;
+            break;
+        case kMenuWiper:
+            settings_.wiper = !settings_.wiper;
+            placeWiper();
             break;
         case kMenuAutostart:
             SetAutostart(!IsAutostartEnabled());

@@ -11,26 +11,39 @@
 #include "sim/snowballs.h"
 #include "sim/surfaces.h"
 #include "sim/types.h"
+#include "sim/wind.h"
+#include "sim/wiper.h"
 
 namespace sim {
 
 struct SnowConfig {
     // Flakes spawned per second per 1000 logical (DPI-independent) px of width.
-    float spawnRate = 12.0f;
-    std::size_t maxFlakes = 6000;
+    float spawnRate = 110.0f;
+    std::size_t maxFlakes = 16000;
     // Horizontal wind, logical px/s (positive = to the right).
     float wind = 0.0f;
     // 0..1: how much the wind varies over time.
     float gustiness = 0.35f;
+    // Eddy speed of the air, logical px/s (on top of the wind).
+    float turbulence = 14.0f;
+    // Snow (px^2, logical) a typical 1 px flake leaves when it lands; sets how
+    // fast piles grow independently of how many particles are drawn.
+    float flakeMass = 0.4f;
+    // No cap on how deep snow piles up (up to the top of the screen), more
+    // snowballs and a larger flake pool.
+    bool unlimited = false;
 };
 
 struct PointerInput {
     bool valid = false;
     Vec2 pos;              // overlay space
     Vec2 vel;              // px/s, smoothed by the caller
-    bool sculpt = false;   // sculpt modifier held (Ctrl+Alt)
-    bool pressed = false;  // left button down
+    bool sculpt = false;   // sculpt modifier held (Ctrl+Alt): make balls from snow
+    bool pressed = false;  // primary button down
 };
+
+// What is under the cursor that the user can grab with the mouse.
+enum class HitKind { None, Snowball, WiperPivot };
 
 class World {
 public:
@@ -59,21 +72,41 @@ public:
     const FlakePool& flakes() const { return flakes_; }
     const std::vector<Surface>& surfaces() const { return surfaces_; }
     const std::vector<Snowball>& snowballs() const { return balls_; }
-    float time() const { return time_; }
+    // Complete snowmen (indices into snowballs()), refreshed every step.
+    const std::vector<Snowman>& snowmen() const { return snowmen_; }
+    double time() const { return time_; }
     float currentWind() const { return windNow_; }
     bool holdingSnowball() const;
+    // A snowball or the wiper is being dragged.
+    bool holdingSomething() const { return holdingSnowball() || wiperHeld_; }
+    HitKind hitTest(Vec2 p) const;
+
+    // --- wiper ----------------------------------------------------------------
+    void setWiperEnabled(bool on) { wiper_.setEnabled(on); }
+    // Puts the pivot at p (clamped to the screens); arm length follows the monitor size.
+    void placeWiper(Vec2 p);
+    const Wiper& wiper() const { return wiper_; }
+    // True once after the user finished dragging the wiper (to persist it).
+    bool takeWiperMoved() {
+        const bool m = wiperMoved_;
+        wiperMoved_ = false;
+        return m;
+    }
 
     // Total snow lying on surfaces, px^2 (for tests/diagnostics).
     float lyingArea() const;
 
 private:
     FlakeSpawn makeFlake(float x, float y, float scale);
-    void addDebris(float x, float y, Vec2 vel, float area, float scale);
+    // A clump knocked off a pile; `mass` px^2 of snow is conserved.
+    void addDebris(float x, float y, Vec2 vel, float mass, float scale);
     bool spawnRoom() const { return flakes_.size() < cfg_.maxFlakes; }
     void spawn(float dt);
     void cull();
-    float floorAt(float x) const;
-    float windMargin() const;
+    void rebuildFloors();
+    float exactFloor(float x) const;
+    // Off the sides, far above, or below the screen bottom in its column.
+    bool outOfWorld(float x, float y, float r) const;
     float averageScale() const;
     float scaleAt(Vec2 p) const;
     float computeWind() const;
@@ -86,10 +119,22 @@ private:
 
     void landFlakes();
     void relaxPiles();
+    void erodePiles(float dt);
     void applyMitten();
-    void updateSculpt();
+    void plowIntoBall(float mass, Vec2 cursor, float scale);
+    void updateGrab();
+    void stepWiper(float dt);
     void growHeld(Snowball& b, float movedX);
     void stepBalls(float dt);
+    Snowball& addBall(Snowball b);   // assigns an id, enforces the ball limit
+    void removeBall(std::size_t i);  // anything stuck on it falls free
+    void followParents();            // stuck balls ride along with their parent
+    void stickResting(float dt);     // balls resting on top of another stick to it
+    void shatter(std::size_t i);
+    bool isAncestor(std::uint32_t maybeAncestor, const Snowball& b) const;
+    int ballIndex(std::uint32_t id) const;  // fast findBall (balls_ is sorted by id)
+    int rootOf(std::size_t i) const;
+    float pileCap(const Surface& s) const;  // max pile height on this surface        // the free ball a glued cluster hangs from
     // heldPointerY: for a dragged ball, the cursor y. Surfaces the cursor has
     // been pulled well below are passed through (lets you lift a ball off a ledge).
     void collideBallWithSurfaces(Snowball& b, float dt, float heldPointerY = kNoSurface);
@@ -99,8 +144,10 @@ private:
     RectF bounds_;
     FlakePool flakes_;
     Rng rng_;
-    float time_ = 0.0f;
+    double time_ = 0.0;  // double: a float clock stalls after a few days of uptime
     float windNow_ = 0.0f;
+    WindField air_;
+    std::vector<float> floors_;  // lowest screen bottom per column bucket
 
     // Window surfaces in z-order (topmost first), followed by screen bottoms.
     std::vector<Surface> surfaces_;
@@ -112,8 +159,16 @@ private:
     bool havePrevPointer_ = false;
     bool wasPressed_ = false;
     float mittenCarry_ = 0.0f;
+    float plowCarry_ = 0.0f;  // snow pushed by the cursor, not yet a ball
+    double lastPlowTime_ = -1.0;
+
+    Wiper wiper_;
+    bool wiperHeld_ = false;
+    bool wiperMoved_ = false;
 
     std::vector<Snowball> balls_;
+    std::vector<Snowman> snowmen_;
+    std::uint32_t nextBallId_ = 1;
 };
 
 }  // namespace sim

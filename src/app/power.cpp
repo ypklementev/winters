@@ -2,15 +2,6 @@
 
 #include <windows.h>
 
-#include <shellapi.h>
-
-bool IsFullscreenAppActive() {
-    QUERY_USER_NOTIFICATION_STATE state{};
-    if (FAILED(SHQueryUserNotificationState(&state))) return false;
-    return state == QUNS_BUSY || state == QUNS_RUNNING_D3D_FULL_SCREEN ||
-           state == QUNS_PRESENTATION_MODE;
-}
-
 bool IsBatterySaverActive() {
     SYSTEM_POWER_STATUS ps{};
     if (!GetSystemPowerStatus(&ps)) return false;

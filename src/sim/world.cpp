@@ -4,37 +4,54 @@
 #include <cmath>
 #include <unordered_map>
 
+#include "sim/flake_shapes.h"
+
 namespace sim {
 
 namespace {
 
 // --- falling flakes (logical px; multiplied by the monitor scale) ----------
-constexpr float kMinRadius = 1.0f;
-constexpr float kMaxRadius = 3.2f;
-constexpr float kBaseFall = 32.0f;       // px/s
-constexpr float kFallPerRadius = 20.0f;  // bigger flakes fall faster
-constexpr float kFallJitter = 16.0f;
-constexpr float kSlowestFall = kBaseFall + kFallPerRadius * kMinRadius;
+constexpr float kFloorBucket = 32.0f;          // column width of the floor table
+constexpr float kMixedFloor = -1.0e30f;        // floor table marker: compute exactly
+constexpr float kAverageFall = 42.0f;          // for prewarm density
 constexpr float kCullSlack = 64.0f;
-constexpr std::size_t kDebrisReserve = 5000;  // pool room for collapse/sweep debris
+constexpr float kCullAbove = 300.0f;           // updrafts may lift flakes this far above the top
+constexpr std::size_t kDebrisReserve = 15000;  // pool room for collapse/sweep/erosion debris
+constexpr float kBigFlakeChance = 0.045f;      // share of large near crystals/plates/clumps
 
 // --- lying snow ------------------------------------------------------------
 constexpr float kCellWidth = 2.0f;     // px per height-map cell
-constexpr float kDeposit = 0.25f;      // landed area = kDeposit * pi * r^2
 constexpr float kMaxPile = 60.0f;      // max pile height
 constexpr float kMaxSlope = 0.7f;      // tan(angle of repose) ~ 35 degrees
 constexpr int kRelaxIterations = 2;
 constexpr float kMinHeadroom = 6.0f;   // edges this close to the screen top hold no snow
-constexpr float kSpillArea = 3.0f;     // spilled area per falling particle
-constexpr float kClumpArea = 5.0f;     // collapse area per particle (minimum)
-constexpr int kMaxCollapseParticles = 1200;
+constexpr float kSpillMass = 0.8f;     // snow per particle sliding off an edge
+constexpr float kClumpMass = 1.2f;     // minimum snow per particle when a pile collapses
+constexpr int kMaxCollapseParticles = 2500;
+constexpr float kMaxInheritSpeed = 2500.0f;  // cap for "window yanked away" debris speed
 constexpr std::uint64_t kGroundIdBase = 0xF1A4E00000000000ull;
+
+// --- wind erosion ("drifting snow") -----------------------------------------
+constexpr float kErosionThreshold = 35.0f;  // wind px/s below which nothing is blown off
+constexpr float kErosionRate = 0.00025f;    // px^2 per px of edge per s, per px/s of excess wind
+constexpr float kErosionMass = 0.6f;
 
 // --- mitten (cursor) ----------------------------------------------------------
 constexpr float kMittenRadius = 20.0f;
 constexpr float kMittenMinSpeed = 60.0f;  // px/s; slower movement doesn't sweep
-constexpr float kMittenArea = 4.0f;
+constexpr float kMittenMass = 0.8f;
 constexpr float kMittenMaxJump = 400.0f;  // longer moves are teleports, not sweeps
+constexpr float kWakeReach = 3.5f;        // air wake radius, in mitten radii
+constexpr float kWakeStrength = 0.35f;
+constexpr float kFlingSpeed = 1400.0f;    // faster swipes fling snow; slower ones push it into a ball
+constexpr float kPlowStartMass = 65.0f;   // pushed snow needed before a ball appears
+constexpr float kKickSpeed = 900.0f;      // without Ctrl+Alt only a swipe this fast knocks a ball
+constexpr float kPlowForget = 0.6f;       // s without pushing before gathered snow is dropped
+constexpr float kPushMemory = 0.3f;       // s a ball counts as "being pushed"
+
+// --- wiper -------------------------------------------------------------------------
+constexpr float kWiperMaxFling = 1600.0f;
+constexpr float kWiperMass = 0.8f;
 
 // --- snowballs ------------------------------------------------------------------
 constexpr float kGravity = 1800.0f;
@@ -42,12 +59,19 @@ constexpr float kBallStartRadius = 4.0f;
 constexpr float kBallMaxRadius = 90.0f;
 constexpr float kBallGrow = 1.5f;  // area gained per area of snow rolled up
 constexpr float kBallBite = 0.3f;  // snow depth picked up per px rolled
-constexpr std::size_t kMaxBalls = 40;
+constexpr std::size_t kMaxBalls = 60;
+constexpr std::size_t kMaxBallsUnlimited = 250;
 constexpr float kBallMaxThrow = 2500.0f;
+constexpr float kShatterSpeed = 900.0f;   // impact speed that breaks a ball (~220 px drop)
+constexpr float kStickDelay = 0.15f;      // s a ball must rest on another before sticking
+constexpr float kMergeDepth = 0.2f;   // stuck balls sink this much (of the smaller radius) into each other
+constexpr float kMergeTime = 0.25f;   // s, time constant of that settling
+constexpr float kStickSpeed = 40.0f;      // max relative speed to count as resting
 
-float radiusForArea(float area, float scale) {
-    const float r = std::sqrt(area / (kDeposit * kPi));
-    return std::clamp(r, 0.8f * scale, 3.5f * scale);
+// Visual size of a clump carrying `mass` px^2 of snow.
+float debrisRadius(float mass, float scale) {
+    const float r = 0.75f * std::sqrt(mass / (scale * scale)) * scale;
+    return std::clamp(r, 0.6f * scale, 2.4f * scale);
 }
 
 }  // namespace
@@ -64,10 +88,14 @@ void World::setConfig(const SnowConfig& cfg) {
     if (flakes_.capacity() != cap) flakes_.setCapacity(cap);
 }
 
+
 void World::setMonitors(std::vector<Monitor> monitors) {
     monitors_ = std::move(monitors);
     bounds_ = {};
     for (const auto& m : monitors_) bounds_ = unite(bounds_, m.bounds);
+    air_.configure(bounds_);
+    rebuildFloors();
+    air_.update(time_, windNow_, cfg_.turbulence);
 
     // Screen bottoms: drop the old ones, add one per monitor.
     surfaces_.erase(std::remove_if(surfaces_.begin(), surfaces_.end(),
@@ -93,6 +121,7 @@ Surface World::makeSurface(std::uint64_t id, const RectF& rect, bool ground, boo
     const float cw = kCellWidth * s.scale;
     const auto cells = static_cast<std::size_t>(std::max(1.0f, std::ceil(rect.width() / cw)));
     s.pile = Heightmap(cells, cw);
+    s.lastSeen = time_;
     return s;
 }
 
@@ -119,8 +148,13 @@ void World::setWindows(const std::vector<WindowInfo>& windows) {
         const bool leftChanged = std::abs(s.rect.left - w.rect.left) > 0.5f;
         const bool widthChanged = std::abs(s.rect.width() - w.rect.width()) > 0.5f;
         if (topChanged || (leftChanged && !widthChanged)) {
-            // Moved: the snow falls off where it was.
-            collapseAll(s, {});
+            // Moved: the snow falls off where it was, flung along if yanked.
+            const float since = std::max(static_cast<float>(time_ - s.lastSeen), kFixedDt);
+            Vec2 vel{(w.rect.left - s.rect.left) / since, (w.rect.top - s.rect.top) / since};
+            const float sp = length(vel);
+            const float maxSp = kMaxInheritSpeed * s.scale;
+            if (sp > maxSp) vel = vel * (maxSp / sp);
+            collapseAll(s, vel * 0.8f);
             Surface fresh = makeSurface(w.id, w.rect, false, w.taskbar);
             fresh.spillCarry = 0.0f;
             s = std::move(fresh);
@@ -133,6 +167,7 @@ void World::setWindows(const std::vector<WindowInfo>& windows) {
             s.rect = w.rect;  // sub-pixel / bottom-only change
         }
         s.taskbar = w.taskbar;
+        s.lastSeen = time_;
         next.push_back(std::move(s));
     }
 
@@ -230,23 +265,24 @@ float World::scaleAt(Vec2 p) const {
 float World::computeWind() const {
     if (cfg_.wind == 0.0f) return 0.0f;
     const float g = cfg_.gustiness;
-    const float t = time_;
-    const float gust = 0.55f * std::sin(0.31f * t) + 0.3f * std::sin(0.97f * t + 1.3f) +
-                       0.15f * std::sin(2.3f * t + 0.4f);
+    const double t = time_;
+    const float gust = static_cast<float>(0.55 * std::sin(0.31 * t) + 0.3 * std::sin(0.97 * t + 1.3) +
+                                          0.15 * std::sin(2.3 * t + 0.4));
     return cfg_.wind * std::max(0.1f, 1.0f + g * gust);
 }
 
-float World::windMargin() const {
-    if (cfg_.wind == 0.0f || bounds_.empty()) return 0.0f;
-    const float maxWind = std::abs(cfg_.wind) * (1.0f + cfg_.gustiness);
-    const float travel = maxWind * bounds_.height() / kSlowestFall;
-    return std::min(travel, bounds_.width());
-}
 
 float World::lyingArea() const {
     float a = 0.0f;
     for (const Surface& s : surfaces_) a += s.pile.totalArea();
     return a;
+}
+
+float World::pileCap(const Surface& s) const {
+    const float normal = kMaxPile * s.scale;
+    if (!cfg_.unlimited) return normal;
+    // Up to the top of the screens, leaving a little headroom.
+    return std::max(normal, s.edgeY() - bounds_.top - kMinHeadroom * s.scale);
 }
 
 bool World::holdingSnowball() const {
@@ -255,31 +291,57 @@ bool World::holdingSnowball() const {
 
 FlakeSpawn World::makeFlake(float x, float y, float scale) {
     FlakeSpawn f;
-    const float t = rng_.uniform();
-    const float r = kMinRadius + (kMaxRadius - kMinRadius) * t * t;  // mostly small
+    // Depth: far flakes are smaller, slower and fainter (parallax).
+    const float z = rng_.uniform();
+    const bool big = z > 0.55f && rng_.uniform() < kBigFlakeChance / 0.45f;
+    float r;  // logical radius
+    FlakeShape shape;
+    if (big) {
+        r = rng_.uniform(3.0f, 6.0f);
+        const float pick = rng_.uniform();
+        shape = pick < 0.45f ? FlakeShape::Crystal : pick < 0.7f ? FlakeShape::Plate : FlakeShape::Clump;
+    } else {
+        r = (0.6f + 1.2f * z) * rng_.uniform(0.8f, 1.25f);
+        shape = r > 1.3f && rng_.uniform() < 0.35f ? FlakeShape::Clump : FlakeShape::Speck;
+    }
+    const float depthSpeed = 0.65f + 0.45f * z;
     f.radius = r * scale;
-    f.fallSpeed = (kBaseFall + kFallPerRadius * r + rng_.uniform(0.0f, kFallJitter)) * scale;
-    f.swayAmp = rng_.uniform(4.0f, 16.0f) * scale;
-    f.swayFreq = rng_.uniform(0.6f, 1.8f);
+    f.fallSpeed = (24.0f + 14.0f * std::sqrt(r) + rng_.uniform(0.0f, 10.0f)) * depthSpeed * scale;
+    // Small grains follow the air closely; big crystals are sluggish.
+    f.response = std::clamp(5.5f - 1.1f * r, 1.4f, 5.0f);
+    const bool flat = shape == FlakeShape::Crystal || shape == FlakeShape::Plate;
+    f.flutterAmp = (flat ? rng_.uniform(10.0f, 24.0f) : rng_.uniform(2.0f, 9.0f)) * scale;
+    f.flutterFreq = flat ? rng_.uniform(1.2f, 2.6f) : rng_.uniform(0.6f, 1.8f);
     f.phase = rng_.uniform(0.0f, 2.0f * kPi);
-    f.alpha = 0.55f + 0.45f * (r - kMinRadius) / (kMaxRadius - kMinRadius);
+    f.angle = rng_.uniform(0.0f, 2.0f * kPi);
+    f.spin = rng_.uniform(-1.6f, 1.6f);
+    f.tumbles = flat;
+    f.alpha = big ? 0.95f : 0.6f + 0.4f * z;
     f.scale = scale;
+    f.mass = cfg_.flakeMass * std::min(r * r, 4.0f) * scale * scale;
+    f.sprite = static_cast<std::uint16_t>(spriteIndex(shape, rng_.next()));
     f.pos = {x, y};
     f.vel = {windNow_ * scale, f.fallSpeed};
     return f;
 }
 
-void World::addDebris(float x, float y, Vec2 vel, float area, float scale) {
+void World::addDebris(float x, float y, Vec2 vel, float mass, float scale) {
     FlakeSpawn f;
     f.pos = {x, y};
     f.vel = vel;
-    f.radius = radiusForArea(area, scale);
-    f.fallSpeed = rng_.uniform(70.0f, 120.0f) * scale;
-    f.swayAmp = rng_.uniform(2.0f, 7.0f) * scale;
-    f.swayFreq = rng_.uniform(0.8f, 2.0f);
+    f.radius = debrisRadius(mass, scale);
+    f.fallSpeed = rng_.uniform(55.0f, 95.0f) * scale;
+    f.response = rng_.uniform(1.2f, 2.2f);
+    f.flutterAmp = rng_.uniform(2.0f, 6.0f) * scale;
+    f.flutterFreq = rng_.uniform(0.8f, 2.0f);
     f.phase = rng_.uniform(0.0f, 2.0f * kPi);
+    f.angle = rng_.uniform(0.0f, 2.0f * kPi);
+    f.spin = rng_.uniform(-3.0f, 3.0f);
     f.alpha = 0.95f;
     f.scale = scale;
+    f.mass = mass;
+    f.sprite = static_cast<std::uint16_t>(
+        spriteIndex(rng_.uniform() < 0.6f ? FlakeShape::Speck : FlakeShape::Clump, rng_.next()));
     flakes_.add(f);
 }
 
@@ -314,17 +376,29 @@ void World::spawn(float dt) {
         }
     }
 
-    // Upwind band outside the virtual screen, so the upwind edge isn't bare.
-    const float margin = windMargin();
-    if (margin > 0.0f) {
-        const float s = averageScale();
-        const int n = count(margin / s);
-        for (int i = 0; i < n && spawnRoom(); ++i) {
-            const float x = cfg_.wind > 0.0f ? rng_.uniform(bounds_.left - margin, bounds_.left)
-                                             : rng_.uniform(bounds_.right, bounds_.right + margin);
-            FlakeSpawn f = makeFlake(x, 0.0f, s);
-            f.pos.y = bounds_.top - f.radius;
-            flakes_.add(f);
+    // With wind, snow also blows in from the upwind side. Influx through a
+    // vertical edge = density * wind speed * height, where density is
+    // spawnRate / fall speed. Injected right at the edge, so no invisible band.
+    if (cfg_.wind != 0.0f) {
+        for (const Monitor& m : monitors_) {
+            const float edgeX = cfg_.wind > 0.0f ? m.bounds.left : m.bounds.right;
+            // Only screen edges with nothing beside them (neighbours feed the rest).
+            const float probeX = cfg_.wind > 0.0f ? edgeX - 1.0f : edgeX + 1.0f;
+            const float logicalH = m.bounds.height() / m.scale;
+            const float influx = cfg_.spawnRate / 1000.0f * std::abs(windNow_) / kAverageFall * logicalH * dt;
+            const int n = static_cast<int>(influx + rng_.uniform());
+            for (int k = 0; k < n && spawnRoom(); ++k) {
+                const float y = rng_.uniform(m.bounds.top, m.bounds.bottom);
+                bool covered = false;
+                for (const Monitor& o : monitors_) {
+                    if (&o != &m && o.bounds.contains({probeX, y})) covered = true;
+                }
+                if (covered) continue;
+                FlakeSpawn f = makeFlake(edgeX, y, m.scale);
+                f.pos.x = cfg_.wind > 0.0f ? edgeX - f.radius * 2.0f : edgeX + f.radius * 2.0f;
+                f.vel.x = windNow_ * m.scale;
+                flakes_.add(f);
+            }
         }
     }
 }
@@ -332,7 +406,7 @@ void World::spawn(float dt) {
 void World::prewarm() {
     for (const auto& m : monitors_) {
         const float logicalWidth = m.bounds.width() / m.scale;
-        const float avgFall = (kBaseFall + kFallPerRadius * 1.6f + kFallJitter * 0.5f) * m.scale;
+        const float avgFall = kAverageFall * m.scale;
         const float crossTime = m.bounds.height() / avgFall;
         const int n = static_cast<int>(cfg_.spawnRate * logicalWidth / 1000.0f * crossTime);
         for (int i = 0; i < n && spawnRoom(); ++i) {
@@ -342,7 +416,29 @@ void World::prewarm() {
     }
 }
 
-float World::floorAt(float x) const {
+void World::rebuildFloors() {
+    floors_.clear();
+    if (bounds_.empty()) return;
+    const auto n = static_cast<std::size_t>(std::ceil(bounds_.width() / kFloorBucket)) + 1;
+    floors_.assign(n, bounds_.bottom);
+    for (std::size_t b = 0; b < n; ++b) {
+        const float x0 = bounds_.left + static_cast<float>(b) * kFloorBucket;
+        const float x1 = x0 + kFloorBucket;
+        float lo = 1e30f, hi = -1e30f;
+        bool partial = false;
+        for (const auto& m : monitors_) {
+            if (m.bounds.left >= x1 || m.bounds.right <= x0) continue;
+            lo = std::min(lo, m.bounds.bottom);
+            hi = std::max(hi, m.bounds.bottom);
+            if (m.bounds.left > x0 || m.bounds.right < x1) partial = true;
+        }
+        if (hi < -1e29f) continue;  // gap between monitors: virtual bottom
+        // Buckets straddling monitors of different heights need the exact test.
+        floors_[b] = (partial && lo != hi) ? kMixedFloor : hi;
+    }
+}
+
+float World::exactFloor(float x) const {
     float floor = -1e30f;
     for (const auto& m : monitors_) {
         if (m.bounds.containsX(x)) floor = std::max(floor, m.bounds.bottom);
@@ -350,20 +446,25 @@ float World::floorAt(float x) const {
     return floor > -1e30f ? floor : bounds_.bottom;
 }
 
+bool World::outOfWorld(float x, float y, float r) const {
+    if (x < bounds_.left - kCullSlack || x > bounds_.right + kCullSlack) return true;
+    if (y < bounds_.top - kCullAbove) return true;
+    const auto b = static_cast<std::size_t>(std::max(0.0f, (x - bounds_.left) / kFloorBucket));
+    float floor = b < floors_.size() ? floors_[b] : bounds_.bottom;
+    if (floor == kMixedFloor) floor = exactFloor(x);
+    return y - r > floor;
+}
+
 void World::cull() {
-    const float margin = windMargin() + kCullSlack;
-    const float minX = bounds_.left - margin;
-    const float maxX = bounds_.right + margin;
     for (std::size_t i = 0; i < flakes_.size();) {
-        const float x = flakes_.x[i];
-        const float top = flakes_.y[i] - flakes_.radius[i];
-        if (x < minX || x > maxX || top > floorAt(x)) {
+        if (outOfWorld(flakes_.x[i], flakes_.y[i], flakes_.radius[i])) {
             flakes_.remove(i);
         } else {
             ++i;
         }
     }
 }
+
 
 void World::landFlakes() {
     for (std::size_t i = 0; i < flakes_.size();) {
@@ -375,7 +476,11 @@ void World::landFlakes() {
         float bestLine = kNoSurface;
         if (y1 > y0) {
             for (std::uint32_t si : index_.at(x)) {
-                const float line = surfaces_[si].lineAt(x);
+                // Cheap reject: the snow line lies within [edge - maxPile, edge].
+                const Surface& cand = surfaces_[si];
+                const float edge = cand.rect.top;
+                if (y0 > edge || y1 < edge - pileCap(cand)) continue;
+                const float line = cand.lineAt(x);
                 if (line != kNoSurface && y0 <= line && y1 >= line && line < bestLine) {
                     bestLine = line;
                     best = static_cast<int>(si);
@@ -383,11 +488,16 @@ void World::landFlakes() {
             }
         }
         if (best < 0) {
-            ++i;
+            // Not landed: drop it if it left the screens (fused cull pass).
+            if (outOfWorld(x, flakes_.y[i], r)) {
+                flakes_.remove(i);
+            } else {
+                ++i;
+            }
             continue;
         }
         Surface& s = surfaces_[static_cast<std::size_t>(best)];
-        s.pile.deposit(x - s.rect.left, r, kDeposit * kPi * r * r, kMaxPile * s.scale);
+        s.pile.deposit(x - s.rect.left, std::max(r, s.pile.cellWidth()), flakes_.mass[i], pileCap(s));
         s.settled = false;
         flakes_.remove(i);
     }
@@ -406,7 +516,7 @@ void World::collapseCells(Surface& s, std::size_t i0, std::size_t i1, Vec2 vel) 
     const float s2 = s.scale * s.scale;
     const std::size_t room = flakes_.capacity() - flakes_.size();
     const float budget = static_cast<float>(std::min<std::size_t>(room, kMaxCollapseParticles));
-    const float per = budget >= 1.0f ? std::max(kClumpArea * s2, total / budget) : total + 1.0f;
+    const float per = budget >= 1.0f ? std::max(kClumpMass * s2, total / budget) : total + 1.0f;
 
     float carry = 0.0f;
     for (std::size_t i = i0; i < i1; ++i) {
@@ -430,7 +540,7 @@ void World::relaxPiles() {
         if (s.settled) continue;
         spillScratch_.clear();
         s.settled = !s.pile.relax(kMaxSlope, kRelaxIterations, spillScratch_);
-        const float unit = kSpillArea * s.scale * s.scale;
+        const float unit = kSpillMass * s.scale * s.scale;
         const float width = s.pile.cellWidth() * static_cast<float>(s.pile.size());
         for (const auto& sp : spillScratch_) {
             s.spillCarry += sp.area;
@@ -444,20 +554,54 @@ void World::relaxPiles() {
     }
 }
 
+void World::erodePiles(float dt) {
+    const float w = std::abs(windNow_);
+    if (w <= kErosionThreshold) return;
+    const int dir = windNow_ > 0.0f ? 1 : -1;
+    constexpr int kTries = 3;
+    for (Surface& s : surfaces_) {
+        const std::size_t n = s.pile.size();
+        if (n < 3) continue;
+        const float cw = s.pile.cellWidth();
+        const float budget = kErosionRate * (w - kErosionThreshold) * static_cast<float>(n) * cw * dt * s.scale;
+        const float unit = kErosionMass * s.scale * s.scale;
+        for (int t = 0; t < kTries; ++t) {
+            const auto i = static_cast<std::size_t>(rng_.uniform() * static_cast<float>(n - 2)) + 1;
+            const float h = s.pile.height(i);
+            if (!s.pile.visible(i) || h < s.scale) continue;
+            // Only crests and windward faces lose snow; lee sides are sheltered.
+            const std::size_t up = static_cast<std::size_t>(static_cast<int>(i) - dir);
+            if (s.pile.visible(up) && s.pile.height(up) > h + 0.3f * s.scale) continue;
+            const float taken = s.pile.lowerTo(i, h - std::min(budget / kTries / cw, h * 0.3f));
+            if (taken <= 0.0f) continue;
+            s.settled = false;
+            s.erosionCarry += taken;
+            while (s.erosionCarry >= unit) {
+                const Vec2 v{windNow_ * s.scale * rng_.uniform(0.6f, 1.0f), -rng_.uniform(10.0f, 45.0f) * s.scale};
+                addDebris(s.cellCenterX(i), s.edgeY() - h - 1.0f, v, unit, s.scale);
+                s.erosionCarry -= unit;
+            }
+        }
+    }
+}
+
 // ============================================================================
 // Mitten (cursor sweeping)
 // ============================================================================
 
 void World::applyMitten() {
-    if (!pointer_.valid || pointer_.sculpt) return;
+    if (!pointer_.valid || holdingSomething()) return;
+    if (time_ - lastPlowTime_ > kPlowForget) plowCarry_ = 0.0f;
+    // Two hands: normally the cursor brushes snow off and leaves snowballs
+    // alone (so they can be hovered and grabbed); with Ctrl+Alt it's a plow
+    // that pushes snow into balls and shoves balls around.
+    const bool plowMode = pointer_.sculpt;
     const Vec2 b = pointer_.pos;
     Vec2 a = havePrevPointer_ ? prevPointer_ : b;
     const float scale = scaleAt(b);
-    const float speed = length(pointer_.vel);
-    if (speed < kMittenMinSpeed * scale) return;
-    if (length(b - a) > kMittenMaxJump * scale) a = b;
-
     const float R = kMittenRadius * scale;
+    const float speed = length(pointer_.vel);
+    if (length(b - a) > kMittenMaxJump * scale) a = b;
     const Vec2 seg = b - a;
     const float segLen2 = dot(seg, seg);
     auto distToSeg = [&](Vec2 p) {
@@ -465,16 +609,65 @@ void World::applyMitten() {
         return length(p - (a + seg * t));
     };
 
-    // Flakes in the air get swept along.
-    for (std::size_t i = 0; i < flakes_.size(); ++i) {
-        const Vec2 p{flakes_.x[i], flakes_.y[i]};
-        const float d = distToSeg(p);
-        if (d > R + flakes_.radius[i]) continue;
-        flakes_.vx[i] = flakes_.vx[i] * 0.3f + pointer_.vel.x * 0.7f + rng_.uniform(-30.0f, 30.0f) * scale;
-        flakes_.vy[i] = flakes_.vy[i] * 0.3f + pointer_.vel.y * 0.7f - rng_.uniform(0.0f, 60.0f) * scale;
+    for (Snowball& ball : balls_) {
+        if (ball.held) continue;
+        if (plowMode) {
+            // Solid pusher (only while moving, so a ball just let go of isn't
+            // shoved away by the resting cursor). Touching any ball of a glued
+            // cluster pushes the whole cluster through its root.
+            if (speed < kMittenMinSpeed * scale) continue;
+            const Vec2 off = ball.pos - b;
+            const float dist = length(off);
+            const float minD = R + ball.radius;
+            if (dist >= minD || dist < 1e-3f) continue;
+            const Vec2 n = off * (1.0f / dist);
+            Snowball& root = balls_[static_cast<std::size_t>(rootOf(static_cast<std::size_t>(&ball - balls_.data())))];
+            if (root.held) continue;
+            root.pos = root.pos + (b + n * minD - ball.pos);
+            if (&root != &ball) ball.pos = b + n * minD;
+            const float vn = dot(pointer_.vel - root.vel, n);
+            if (vn > 0.0f) root.vel = root.vel + n * vn;
+            root.pushedAt = time_;
+            root.stillTime = 0.0f;
+        } else {
+            // Only a real swipe through a ball knocks it (and off a stack).
+            if (speed < kKickSpeed * scale || distToSeg(ball.pos) > R + ball.radius) continue;
+            ball.parent = 0;
+            const float k = std::clamp(12.0f * scale / ball.radius, 0.05f, 0.6f);
+            ball.vel = ball.vel + (pointer_.vel - ball.vel) * k;
+        }
+        ball.pushedAt = time_;
+        ball.stillTime = 0.0f;
     }
 
-    // Lying snow inside the swept capsule is knocked off.
+    if (speed < kMittenMinSpeed * scale) return;
+
+    // The moving hand drags the air: flakes nearby are pulled into its wake,
+    // ones it actually hits are flung.
+    const float wakeR = R * kWakeReach;
+    const float bx0 = std::min(a.x, b.x) - wakeR, bx1 = std::max(a.x, b.x) + wakeR;
+    const float by0 = std::min(a.y, b.y) - wakeR, by1 = std::max(a.y, b.y) + wakeR;
+    for (std::size_t i = 0; i < flakes_.size(); ++i) {
+        const float fx = flakes_.x[i], fy = flakes_.y[i];
+        if (fx < bx0 || fx > bx1 || fy < by0 || fy > by1) continue;
+        const float d = distToSeg({fx, fy});
+        if (d > wakeR) continue;
+        const float fall = 1.0f - d / wakeR;
+        float k = kWakeStrength * fall * fall;
+        float lift = 0.0f;
+        if (d < R + flakes_.radius[i]) {
+            k = 0.7f;
+            lift = rng_.uniform(0.0f, 60.0f) * scale;
+        }
+        flakes_.vx[i] += (pointer_.vel.x - flakes_.vx[i]) * k + rng_.uniform(-20.0f, 20.0f) * scale * k;
+        flakes_.vy[i] += (pointer_.vel.y - flakes_.vy[i]) * k - lift;
+    }
+
+    // Lying snow inside the swept capsule is knocked off. A quick flick (or a
+    // mostly vertical swipe) throws it; an unhurried push gathers it into a ball.
+    const bool fling = !plowMode || speed > kFlingSpeed * scale ||
+                       std::abs(pointer_.vel.y) > std::abs(pointer_.vel.x) * 1.5f;
+    float gathered = 0.0f;
     const float x0 = std::min(a.x, b.x) - R;
     const float x1 = std::max(a.x, b.x) + R;
     const int samples = std::clamp(static_cast<int>(std::sqrt(segLen2) / (R * 0.5f)) + 1, 1, 24);
@@ -485,7 +678,7 @@ void World::applyMitten() {
         for (int k = 0; k < samples; ++k) {
             const float t = samples == 1 ? 1.0f : static_cast<float>(k) / static_cast<float>(samples - 1);
             const Vec2 c = a + seg * t;
-            if (c.y - R > s.edgeY() || c.y + R < s.edgeY() - kMaxPile * s.scale) continue;
+            if (c.y - R > s.edgeY() || c.y + R < s.edgeY() - pileCap(s)) continue;
             const int i0 = std::max(0, static_cast<int>((c.x - R - s.rect.left) / cw));
             const int i1 = std::min(static_cast<int>(s.pile.size()) - 1,
                                     static_cast<int>((c.x + R - s.rect.left) / cw));
@@ -501,8 +694,12 @@ void World::applyMitten() {
                 const float removed = s.pile.lowerTo(ui, s.edgeY() - (c.y + half));
                 if (removed <= 0.0f) continue;
                 touched = true;
+                if (!fling) {
+                    gathered += removed;
+                    continue;
+                }
                 mittenCarry_ += removed;
-                const float unit = kMittenArea * s.scale * s.scale;
+                const float unit = kMittenMass * s.scale * s.scale;
                 while (mittenCarry_ >= unit) {
                     const Vec2 v = pointer_.vel * 0.55f +
                                    Vec2{rng_.uniform(-40.0f, 40.0f), -rng_.uniform(60.0f, 180.0f)} * s.scale;
@@ -513,59 +710,138 @@ void World::applyMitten() {
         }
         if (touched) s.settled = false;
     });
+    if (gathered > 0.0f) plowIntoBall(gathered, b, scale);
+}
 
-    // Loose snowballs get kicked.
+void World::plowIntoBall(float mass, Vec2 cursor, float scale) {
+    lastPlowTime_ = time_;
+    const float R = kMittenRadius * scale;
+    // Feed the ball the hand is currently pushing, if any.
+    Snowball* pushed = nullptr;
+    float best = 1e30f;
     for (Snowball& ball : balls_) {
-        if (ball.held) continue;
-        if (distToSeg(ball.pos) > R + ball.radius) continue;
-        const float k = std::clamp(12.0f * scale / ball.radius, 0.05f, 0.6f);
-        ball.vel = ball.vel + (pointer_.vel - ball.vel) * k;
-        ball.stillTime = 0.0f;
+        if (ball.held || time_ - ball.pushedAt > kPushMemory) continue;
+        // A ball at its size limit can't take more: the snow starts a new one
+        // (it used to vanish into the full ball, so plowing seemed to stop).
+        if (ball.radius >= kBallMaxRadius * ball.scale * 0.98f) continue;
+        const float d = length(ball.pos - cursor) - ball.radius;
+        if (d < R * 2.0f && d < best) {
+            best = d;
+            pushed = &ball;
+        }
     }
+    if (pushed) {
+        const float area = kPi * pushed->radius * pushed->radius + (mass + plowCarry_) * kBallGrow;
+        pushed->radius = std::min(std::sqrt(area / kPi), kBallMaxRadius * pushed->scale);
+        plowCarry_ = 0.0f;
+        return;
+    }
+    plowCarry_ += mass;
+    if (plowCarry_ < kPlowStartMass * scale * scale) return;
+
+    // Enough snow gathered: it rolls up into a ball in front of the hand.
+    Snowball ball;
+    ball.scale = scale;
+    ball.radius = std::max(std::sqrt(plowCarry_ * kBallGrow / kPi), kBallStartRadius * scale);
+    const float dir = pointer_.vel.x >= 0.0f ? 1.0f : -1.0f;
+    const float x = cursor.x + dir * (R + ball.radius + 1.0f);
+    // Sit it on the snow line closest to the hand's height.
+    float y = cursor.y;
+    float bestDy = 1e30f;
+    for (std::uint32_t si : index_.at(x)) {
+        const float line = surfaces_[si].lineAt(x);
+        if (line == kNoSurface) continue;
+        const float dy = std::abs(line - cursor.y);
+        if (dy < R * 2.0f + ball.radius && dy < bestDy) {
+            bestDy = dy;
+            y = line - ball.radius;
+        }
+    }
+    ball.pos = ball.prevPos = {x, y};
+    ball.vel = {pointer_.vel.x, 0.0f};
+    ball.pushedAt = time_;
+    addBall(ball);
+    plowCarry_ = 0.0f;
 }
 
 // ============================================================================
-// Snowballs
+// Grabbing: snowballs and the wiper can be dragged with the mouse
 // ============================================================================
 
-void World::updateSculpt() {
-    const bool pressed = pointer_.valid && pointer_.sculpt && pointer_.pressed;
+HitKind World::hitTest(Vec2 p) const {
+    for (const Snowball& b : balls_) {
+        if (length(b.pos - p) < b.radius + 4.0f * b.scale) return HitKind::Snowball;
+    }
+    if (wiper_.enabled() && length(wiper_.pivot() - p) < wiper_.pivotRadius() + 4.0f * wiper_.scale()) {
+        return HitKind::WiperPivot;
+    }
+    return HitKind::None;
+}
+
+void World::updateGrab() {
+    const bool pressed = pointer_.valid && pointer_.pressed;
+    const bool pressEdge = pressed && !wasPressed_;
     auto heldIt = std::find_if(balls_.begin(), balls_.end(), [](const Snowball& b) { return b.held; });
 
-    if (pressed && !wasPressed_ && heldIt == balls_.end()) {
+    if (pressEdge && heldIt == balls_.end() && !wiperHeld_) {
         const Vec2 p = pointer_.pos;
         const float scale = scaleAt(p);
-        // 1) Grab an existing ball.
-        for (Snowball& b : balls_) {
-            if (length(b.pos - p) < b.radius + 6.0f * scale) {
-                b.held = true;
+        switch (hitTest(p)) {
+            case HitKind::Snowball: {
+                // The nearest ball under the cursor.
+                float best = 1e30f;
+                for (auto it = balls_.begin(); it != balls_.end(); ++it) {
+                    const float d = length(it->pos - p) - it->radius;
+                    if (d < best) {
+                        best = d;
+                        heldIt = it;
+                    }
+                }
+                heldIt->held = true;
+                heldIt->parent = 0;  // taking a ball off a stack unsticks it
+                heldIt->settleOn = 0;
+                break;
+            }
+            case HitKind::WiperPivot:
+                wiperHeld_ = true;
+                break;
+            case HitKind::None: {
+                // Sculpt mode: start a new ball from the snow under the cursor.
+                if (!pointer_.sculpt) break;
+                bool onSnow = false;
+                for (std::uint32_t si : index_.at(p.x)) {
+                    const Surface& s = surfaces_[si];
+                    const float line = s.lineAt(p.x);
+                    if (line == kNoSurface) continue;
+                    const float h = s.edgeY() - line;
+                    if (h >= 1.0f * scale && p.y >= line - 14.0f * scale && p.y <= s.edgeY() + 6.0f * scale) {
+                        onSnow = true;
+                        break;
+                    }
+                }
+                if (onSnow) {
+                    Snowball b;
+                    b.radius = kBallStartRadius * scale;
+                    b.scale = scale;
+                    b.pos = b.prevPos = p;
+                    b.held = true;
+                    const std::uint32_t id = addBall(b).id;
+                    heldIt = balls_.begin() + ballIndex(id);
+                }
                 break;
             }
         }
-        heldIt = std::find_if(balls_.begin(), balls_.end(), [](const Snowball& b) { return b.held; });
-        // 2) Or start a new one from snow under the cursor.
-        if (heldIt == balls_.end()) {
-            bool onSnow = false;
-            for (std::uint32_t si : index_.at(p.x)) {
-                const Surface& s = surfaces_[si];
-                const float line = s.lineAt(p.x);
-                if (line == kNoSurface) continue;
-                const float h = s.edgeY() - line;
-                if (h >= 1.0f * scale && p.y >= line - 14.0f * scale && p.y <= s.edgeY() + 6.0f * scale) {
-                    onSnow = true;
-                    break;
-                }
-            }
-            if (onSnow) {
-                if (balls_.size() >= kMaxBalls) balls_.erase(balls_.begin());
-                Snowball b;
-                b.radius = kBallStartRadius * scale;
-                b.scale = scale;
-                b.pos = b.prevPos = p;
-                b.held = true;
-                balls_.push_back(b);
-                heldIt = balls_.end() - 1;
-            }
+    }
+
+    if (wiperHeld_) {
+        if (!pressed) {
+            wiperHeld_ = false;
+            placeWiper(wiper_.pivot());  // re-fit the arm to the monitor it was dropped on
+            wiperMoved_ = true;
+        } else {
+            const Vec2 p{std::clamp(pointer_.pos.x, bounds_.left, bounds_.right),
+                         std::clamp(pointer_.pos.y, bounds_.top, bounds_.bottom)};
+            wiper_.setPivot(p);
         }
     }
 
@@ -589,6 +865,120 @@ void World::updateSculpt() {
     wasPressed_ = pressed;
 }
 
+void World::placeWiper(Vec2 p) {
+    if (monitors_.empty()) return;
+    p = {std::clamp(p.x, bounds_.left, bounds_.right - 1.0f), std::clamp(p.y, bounds_.top, bounds_.bottom - 1.0f)};
+    const Monitor* mon = &monitors_.front();
+    for (const Monitor& m : monitors_) {
+        if (m.bounds.contains(p)) mon = &m;
+    }
+    const float s = mon->scale;
+    const float len = std::clamp(0.42f * mon->bounds.height(), 160.0f * s, 640.0f * s);
+    wiper_.place(p, len, s);
+}
+
+// ============================================================================
+// Wiper
+// ============================================================================
+
+void World::stepWiper(float dt) {
+    if (!wiper_.enabled()) return;
+    wiper_.step(dt);
+    if (wiper_.angularVelocity() == 0.0f) return;  // parked between wipes
+
+    const Vec2 pv = wiper_.pivot();
+    const float L = wiper_.length();
+    const float s = wiper_.scale();
+    const float w = wiper_.bladeHalfWidth();
+    const float dirSign = wiper_.angularVelocity() > 0.0f ? 1.0f : -1.0f;
+    auto flingAt = [&](Vec2 p) {
+        Vec2 v = wiper_.velocityAt(p);
+        const float sp = length(v);
+        const float maxSp = kWiperMaxFling * s;
+        if (sp > maxSp) v = v * (maxSp / sp);
+        return v;
+    };
+    // Moves p (swept by the blade) to just ahead of it, so it isn't hit twice
+    // or tunnelled through.
+    auto pushAhead = [&](Vec2 p, float pad) {
+        const Vec2 r = p - pv;
+        const float dist = std::max(length(r), 1.0f);
+        const float a = wiper_.angle() + dirSign * (w + pad + 1.0f) / dist;
+        return pv + Wiper::direction(a) * dist;
+    };
+
+    // Flakes in the air.
+    for (std::size_t i = 0; i < flakes_.size(); ++i) {
+        const float fx = flakes_.x[i], fy = flakes_.y[i];
+        if (fx < pv.x - L - w || fx > pv.x + L + w || fy < pv.y - L - w || fy > pv.y + w) continue;
+        const Vec2 p{fx, fy};
+        if (!wiper_.swept(p, flakes_.radius[i])) continue;
+        const Vec2 v = flingAt(p) * rng_.uniform(0.9f, 1.2f) +
+                       Vec2{rng_.uniform(-20.0f, 20.0f), -rng_.uniform(0.0f, 40.0f)} * s;
+        const Vec2 q = pushAhead(p, flakes_.radius[i]);
+        flakes_.x[i] = q.x;
+        flakes_.y[i] = flakes_.py[i] = q.y;
+        flakes_.vx[i] = v.x;
+        flakes_.vy[i] = v.y;
+    }
+
+    // Lying snow: in each column, everything above the lowest point the blade
+    // swept over is wiped off. The angle of points along a vertical column is
+    // monotonic in y, so a quick angular-range test rejects most columns; the
+    // rest are scanned bottom-up.
+    const float lo = std::min(wiper_.prevAngle(), wiper_.angle());
+    const float hi = std::max(wiper_.prevAngle(), wiper_.angle());
+    auto angleOf = [&](float x, float y) { return std::atan2(pv.y - y, x - pv.x); };
+    index_.forRange(pv.x - L - w, pv.x + L + w, [&](std::uint32_t si) {
+        Surface& sf = surfaces_[si];
+        if (sf.edgeY() < pv.y - L - w || sf.edgeY() - pileCap(sf) > pv.y + w) return;
+        const float cw = sf.pile.cellWidth();
+        const int i0 = std::max(0, static_cast<int>((pv.x - L - w - sf.rect.left) / cw));
+        const int i1 = std::min(static_cast<int>(sf.pile.size()) - 1, static_cast<int>((pv.x + L + w - sf.rect.left) / cw));
+        bool touched = false;
+        for (int i = i0; i <= i1; ++i) {
+            const auto ui = static_cast<std::size_t>(i);
+            const float h = sf.pile.height(ui);
+            if (h <= 0.0f || !sf.pile.visible(ui)) continue;
+            const float cx = sf.cellCenterX(ui);
+            const float top = sf.edgeY() - h;
+            const float aTop = angleOf(cx, top), aBottom = angleOf(cx, sf.edgeY());
+            const float margin = (w + cw) / std::max(1.0f, length(Vec2{cx, top} - pv) * 0.5f);
+            if (std::max(aTop, aBottom) < lo - margin || std::min(aTop, aBottom) > hi + margin) continue;
+            float low = -1.0f;
+            for (float y = sf.edgeY() - 0.5f; y > top; y -= 1.5f) {
+                if (wiper_.swept({cx, y}, 0.0f)) {
+                    low = y;
+                    break;
+                }
+            }
+            if (low < 0.0f) continue;
+            const float removed = sf.pile.lowerTo(ui, sf.edgeY() - low - 0.5f);
+            if (removed <= 0.0f) continue;
+            touched = true;
+            mittenCarry_ += removed;
+            const float unit = kWiperMass * sf.scale * sf.scale;
+            while (mittenCarry_ >= unit) {
+                const Vec2 p{cx, top + rng_.uniform() * (low - top)};
+                const Vec2 v = flingAt(p) * rng_.uniform(0.6f, 1.05f) +
+                               Vec2{rng_.uniform(-30.0f, 30.0f), -rng_.uniform(20.0f, 90.0f)} * sf.scale;
+                addDebris(p.x, p.y - 1.0f, v, unit, sf.scale);
+                mittenCarry_ -= unit;
+            }
+        }
+        if (touched) sf.settled = false;
+    });
+
+    // Snowballs get batted away.
+    for (Snowball& b : balls_) {
+        if (b.held || !wiper_.swept(b.pos, b.radius)) continue;
+        b.parent = 0;
+        b.pos = b.prevPos = pushAhead(b.pos, b.radius);
+        b.vel = flingAt(b.pos) * 0.9f;
+        b.stillTime = 0.0f;
+    }
+}
+
 void World::growHeld(Snowball& b, float movedX) {
     if (movedX <= 0.0f) return;
     float removed = 0.0f;
@@ -597,7 +987,7 @@ void World::growHeld(Snowball& b, float movedX) {
     index_.forRange(b.pos.x - r, b.pos.x + r, [&](std::uint32_t si) {
         Surface& s = surfaces_[si];
         const float edge = s.edgeY();
-        if (edge < b.pos.y - r || edge - kMaxPile * s.scale > b.pos.y + r + 4.0f * s.scale) return;
+        if (edge < b.pos.y - r || edge - pileCap(s) > b.pos.y + r + 4.0f * s.scale) return;
         const float cw = s.pile.cellWidth();
         const int i0 = std::max(0, static_cast<int>((b.pos.x - r - s.rect.left) / cw));
         const int i1 = std::min(static_cast<int>(s.pile.size()) - 1, static_cast<int>((b.pos.x + r - s.rect.left) / cw));
@@ -645,17 +1035,196 @@ void World::collideBallWithSurfaces(Snowball& b, float dt, float heldPointerY) {
     b.pos.y = bestReq;
     b.contact = true;
     if (heldPointerY != kNoSurface) return;  // dragged: just ride on top
+    b.impactSpeed = std::max(b.impactSpeed, b.vel.y);
     if (b.vel.y > 0.0f) b.vel.y = b.vel.y > 150.0f * b.scale ? -b.vel.y * 0.15f : 0.0f;
     b.vel.x *= std::exp(-4.0f * dt);
     // Resting on a corner only: roll off towards the unsupported side.
     if (std::abs(bestDx) > 0.3f * r) b.vel.x -= (bestDx > 0.0f ? 1.0f : -1.0f) * kGravity * b.scale * 0.35f * dt;
 }
 
+Snowball& World::addBall(Snowball b) {
+    if (balls_.size() >= (cfg_.unlimited ? kMaxBallsUnlimited : kMaxBalls)) {
+        // Drop the oldest ball that isn't part of something (or just the oldest).
+        std::size_t victim = 0;
+        for (std::size_t k = 0; k < balls_.size(); ++k) {
+            const bool hasChild = std::any_of(balls_.begin(), balls_.end(),
+                                              [&](const Snowball& o) { return o.parent == balls_[k].id; });
+            if (!balls_[k].held && balls_[k].parent == 0 && !hasChild) {
+                victim = k;
+                break;
+            }
+        }
+        removeBall(victim);
+    }
+    b.id = nextBallId_++;
+    balls_.push_back(b);
+    return balls_.back();
+}
+
+void World::removeBall(std::size_t i) {
+    const std::uint32_t id = balls_[i].id;
+    for (Snowball& o : balls_) {
+        if (o.parent == id) o.parent = 0;
+    }
+    balls_.erase(balls_.begin() + static_cast<std::ptrdiff_t>(i));
+}
+
+bool World::isAncestor(std::uint32_t maybeAncestor, const Snowball& b) const {
+    std::uint32_t p = b.parent;
+    for (int guard = 0; p != 0 && guard < 64; ++guard) {
+        if (p == maybeAncestor) return true;
+        const int k = ballIndex(p);
+        if (k < 0) break;
+        p = balls_[static_cast<std::size_t>(k)].parent;
+    }
+    return false;
+}
+
+int World::ballIndex(std::uint32_t id) const {
+    // balls_ stays sorted by id (ids only grow, erase keeps order).
+    const auto it = std::lower_bound(balls_.begin(), balls_.end(), id,
+                                     [](const Snowball& b, std::uint32_t v) { return b.id < v; });
+    return it != balls_.end() && it->id == id ? static_cast<int>(it - balls_.begin()) : -1;
+}
+
+void World::followParents() {
+    // Glued clusters can be any shape and depth: place parents before their
+    // children by walking the tree in depth order.
+    const std::size_t n = balls_.size();
+    std::vector<int> depth(n, -1);
+    std::vector<int> parentIdx(n, -1);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (balls_[i].parent == 0) continue;
+        parentIdx[i] = ballIndex(balls_[i].parent);
+        if (parentIdx[i] < 0) balls_[i].parent = 0;  // parent is gone: fall free
+    }
+    int maxDepth = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        // Walk up to the first ball with a known depth (guarded against cycles).
+        int d = 0;
+        int k = static_cast<int>(i);
+        while (k >= 0 && depth[static_cast<std::size_t>(k)] < 0 && d <= static_cast<int>(n)) {
+            k = parentIdx[static_cast<std::size_t>(k)];
+            ++d;
+        }
+        const int base = k >= 0 ? depth[static_cast<std::size_t>(k)] + 1 : 0;
+        // Fill the chain we just walked.
+        int j = static_cast<int>(i);
+        for (int step = d; step > 0 && j >= 0; --step) {
+            depth[static_cast<std::size_t>(j)] = base + step - 1;
+            j = parentIdx[static_cast<std::size_t>(j)];
+        }
+        maxDepth = std::max(maxDepth, depth[i]);
+    }
+    for (int level = 1; level <= maxDepth; ++level) {
+        for (std::size_t i = 0; i < n; ++i) {
+            Snowball& b = balls_[i];
+            if (depth[i] != level || b.parent == 0 || b.held) continue;
+            const Snowball& p = balls_[static_cast<std::size_t>(parentIdx[i])];
+            b.prevPos = b.pos;
+            b.pos = p.pos + b.offset;
+            b.vel = p.vel;
+        }
+    }
+}
+
+int World::rootOf(std::size_t i) const {
+    int k = static_cast<int>(i);
+    for (std::size_t guard = 0; guard <= balls_.size(); ++guard) {
+        const Snowball& b = balls_[static_cast<std::size_t>(k)];
+        if (b.parent == 0 || b.held) return k;
+        const int p = ballIndex(b.parent);
+        if (p < 0) return k;
+        k = p;
+    }
+    return k;
+}
+
+void World::stickResting(float dt) {
+    // Stuck balls slowly settle into the one below, as packed snow does.
+    for (Snowball& a : balls_) {
+        if (a.parent == 0 || a.held) continue;
+        const int k = ballIndex(a.parent);
+        if (k < 0) continue;
+        const Snowball& b = balls_[static_cast<std::size_t>(k)];
+        const float target = a.radius + b.radius - kMergeDepth * std::min(a.radius, b.radius);
+        const float len = length(a.offset);
+        if (len <= target + 0.01f || len < 1e-3f) continue;
+        const float next = std::max(target, len - (len - target) * (1.0f - std::exp(-dt / kMergeTime)) - 0.5f * a.scale * dt);
+        a.offset = a.offset * (next / len);
+    }
+    for (Snowball& a : balls_) {
+        if (a.held || a.parent != 0) continue;
+        // Any resting ball touching it from above or from the side: snow
+        // packs together, so clusters of any size and shape hold. The ball
+        // most directly underneath wins.
+        std::uint32_t on = 0;
+        float bestBelow = -1e30f;
+        for (const Snowball& b : balls_) {
+            if (&a == &b || b.held || isAncestor(a.id, b)) continue;
+            const float dist = length(a.pos - b.pos);
+            if (dist > a.radius + b.radius + 1.5f * a.scale || dist < 1e-3f) continue;
+            const float below = (b.pos.y - a.pos.y) / dist;  // 1 = straight under, 0 = beside
+            if (below < -0.3f) continue;                     // don't hang from a ball above
+            if (length(a.vel - b.vel) > kStickSpeed * a.scale) continue;
+            if (below > bestBelow) {
+                bestBelow = below;
+                on = b.id;
+            }
+        }
+        if (on == 0) {
+            a.settleOn = 0;
+            a.settleTime = 0.0f;
+            continue;
+        }
+        if (a.settleOn != on) {
+            a.settleOn = on;
+            a.settleTime = 0.0f;
+        }
+        a.settleTime += dt;
+        if (a.settleTime < kStickDelay) continue;
+        const Snowball& b = balls_[static_cast<std::size_t>(ballIndex(on))];
+        const Vec2 d = a.pos - b.pos;
+        const float len = std::max(length(d), 1e-3f);
+        a.parent = on;
+        a.offset = d * ((a.radius + b.radius) / len);  // snug contact
+        a.pos = b.pos + a.offset;
+        a.vel = b.vel;
+        a.settleOn = 0;
+    }
+}
+
+void World::shatter(std::size_t i) {
+    const Snowball b = balls_[i];
+    removeBall(i);
+    const float s = b.scale;
+    float mass = kPi * b.radius * b.radius / kBallGrow;  // the snow it was rolled from
+
+    if (mass <= 0.0f) return;
+    // The whole ball bursts into loose snow: many small flakes, the outer
+    // ones flying fastest, all of it settling back as fresh powder.
+    const float unit = std::max(0.8f * s * s, mass / 900.0f);
+    for (float m = mass; m > 0.0f; m -= unit) {
+        const float ang = rng_.uniform(0.0f, 2.0f * kPi);
+        const float u = std::sqrt(rng_.uniform());
+        const float rr = u * b.radius;
+        const Vec2 dir{std::cos(ang), std::sin(ang)};
+        const Vec2 p = b.pos + dir * rr;
+        const Vec2 v = dir * (rng_.uniform(40.0f, 140.0f) + 180.0f * u) * s +
+                       Vec2{b.vel.x * 0.2f, -rng_.uniform(40.0f, 220.0f) * s};
+        addDebris(p.x, p.y, v, std::min(unit, m), s);
+    }
+}
+
 void World::stepBalls(float dt) {
-    if (balls_.empty()) return;
+    if (balls_.empty()) {
+        snowmen_.clear();
+        return;
+    }
     for (Snowball& b : balls_) {
         b.contact = false;
-        if (b.held) continue;
+        b.impactSpeed = 0.0f;
+        if (b.kinematic()) continue;
         b.prevPos = b.pos;
         b.vel.y += kGravity * b.scale * dt;
         b.vel = b.vel * std::exp(-0.3f * dt);
@@ -663,13 +1232,30 @@ void World::stepBalls(float dt) {
     }
     for (int round = 0; round < 2; ++round) {
         for (Snowball& b : balls_) {
-            if (!b.held) collideBallWithSurfaces(b, dt);
+            if (!b.kinematic()) collideBallWithSurfaces(b, dt);
         }
+        followParents();
         resolveBallContacts(balls_, 3);
     }
+    followParents();
+    stickResting(dt);
+
     for (std::size_t i = 0; i < balls_.size();) {
         Snowball& b = balls_[i];
-        if (!b.held) {
+        // A hard landing (dropped from high, thrown, hit by the wiper) breaks it.
+        if (!b.kinematic() && b.impactSpeed > kShatterSpeed * b.scale) {
+            shatter(i);
+            continue;
+        }
+        // Rolling: angle follows horizontal travel (for the renderer's texture),
+        // and a ball rolling over snow picks it up.
+        if (b.held) {
+            b.angle += (b.pos.x - b.prevPos.x) / b.radius;
+        } else if (b.contact && b.parent == 0) {
+            b.angle += b.vel.x * dt / b.radius;
+            if (std::abs(b.vel.x) > 5.0f * b.scale) growHeld(b, std::abs(b.vel.x) * dt);
+        }
+        if (!b.kinematic()) {
             if (b.pos.x - b.radius < bounds_.left) {
                 b.pos.x = bounds_.left + b.radius;
                 b.vel.x = std::abs(b.vel.x) * 0.3f;
@@ -684,11 +1270,21 @@ void World::stepBalls(float dt) {
                 b.stillTime = 0.0f;
             }
             if (b.pos.y - b.radius > bounds_.bottom) {
-                balls_.erase(balls_.begin() + static_cast<std::ptrdiff_t>(i));
+                removeBall(i);
                 continue;
             }
         }
         ++i;
+    }
+
+    // Snowmen: a fresh one gets its hat, nose and eyes (timestamp drives the
+    // renderer's pop-in animation).
+    snowmen_ = findSnowmen(balls_);
+    for (Snowball& b : balls_) {
+        const bool head = std::any_of(snowmen_.begin(), snowmen_.end(),
+                                      [&](const Snowman& m) { return &balls_[m.head] == &b; });
+        if (!head) b.decoratedAt = -1.0;
+        else if (b.decoratedAt < 0.0) b.decoratedAt = time_;
     }
 }
 
@@ -700,14 +1296,16 @@ void World::step(float dt) {
     time_ += dt;
     if (monitors_.empty()) return;
     windNow_ = computeWind();
+    air_.update(time_, windNow_, cfg_.turbulence);
     spawn(dt);
+    updateGrab();
     applyMitten();
-    updateSculpt();
-    integrateFlakes(flakes_, dt, windNow_, time_);
+    stepWiper(dt);
+    integrateFlakes(flakes_, dt, &air_);
     landFlakes();
     stepBalls(dt);
     relaxPiles();
-    cull();
+    erodePiles(dt);
     prevPointer_ = pointer_.pos;
     havePrevPointer_ = pointer_.valid;
 }
@@ -720,7 +1318,10 @@ void World::clear() {
         s.settled = true;
     }
     balls_.clear();
+    snowmen_.clear();
     mittenCarry_ = 0.0f;
+    plowCarry_ = 0.0f;
+    wiperHeld_ = false;
 }
 
 }  // namespace sim

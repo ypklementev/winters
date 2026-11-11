@@ -75,10 +75,5 @@ int SurfaceIndex::bucketOf(float x) const {
     return std::clamp(b, 0, static_cast<int>(buckets_.size()) - 1);
 }
 
-const std::vector<std::uint32_t>& SurfaceIndex::at(float x) const {
-    if (buckets_.empty()) return empty_;
-    if (x < origin_ || x > origin_ + kBucketWidth * static_cast<float>(buckets_.size())) return empty_;
-    return buckets_[static_cast<std::size_t>(bucketOf(x))];
-}
 
 }  // namespace sim

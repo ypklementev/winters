@@ -26,7 +26,7 @@ TEST(piles_ground_accumulates_and_taskbar_hides_it) {
     w.setMonitors({makeMonitor(0, 0, 1000, 800), makeMonitor(1000, 0, 2000, 800)});
     // Taskbar only on the first monitor.
     w.setWindows({makeWindow(7, 0, 752, 1000, 800, true)});
-    th::runSeconds(w, 10.0f);
+    th::runSeconds(w, 45.0f);  // small flakes need ~40 s to reach y=800
     const Surface* tb = th::findSurface(w, 7);
     REQUIRE(tb != nullptr);
     CHECK(tb->pile.totalArea() > 100.0f);
@@ -130,7 +130,7 @@ TEST(piles_maximized_window_lets_snow_fall_to_taskbar) {
     th::heavySnow(w);
     w.setMonitors({makeMonitor(0, 0, 1000, 800)});
     w.setWindows({makeWindow(5, 0, 752, 1000, 800, true), makeWindow(6, 0, 0, 1000, 752)});
-    th::runSeconds(w, 8.0f);
+    th::runSeconds(w, 45.0f);  // small flakes need ~40 s to reach y=800
     CHECK(th::findSurface(w, 6)->pile.totalArea() == 0.0f);
     CHECK(th::findSurface(w, 5)->pile.totalArea() > 100.0f);
 }
@@ -164,7 +164,7 @@ TEST(piles_stacked_monitor_bottom_is_not_a_floor) {
     World w(11);
     th::heavySnow(w);
     w.setMonitors({makeMonitor(0, 0, 1000, 500), makeMonitor(0, 500, 1000, 1000)});
-    th::runSeconds(w, 15.0f);
+    th::runSeconds(w, 45.0f);  // small flakes need ~40 s to reach y=800
     for (const auto& s : w.surfaces()) {
         if (!s.ground) continue;
         if (s.edgeY() == 500.0f) CHECK(s.pile.totalArea() == 0.0f);

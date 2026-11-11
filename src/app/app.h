@@ -25,7 +25,6 @@ public:
 private:
     enum PauseReason : unsigned {
         kPauseUser = 1u << 0,
-        kPauseFullscreen = 1u << 1,
         kPauseBattery = 1u << 2,
         kPauseLocked = 1u << 3,
         kPauseSuspended = 1u << 4,
@@ -50,6 +49,8 @@ private:
     void updateTooltip();
 
     void applySettings();
+    // Puts the wiper at its saved place (or the default) and applies on/off.
+    void placeWiper();
     void showTrayMenu(POINT at);
     void showHelp();
 

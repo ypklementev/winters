@@ -1,8 +1,10 @@
 #include <algorithm>
 
 #include "mini_test.h"
+#include "sim/flake_shapes.h"
 #include "sim/flakes.h"
 #include "sim/rng.h"
+#include "sim/wind.h"
 #include "sim/world.h"
 
 using namespace sim;
@@ -57,9 +59,12 @@ TEST(integrate_relaxes_to_terminal_velocity) {
     FlakeSpawn s;
     s.vel = {500.0f, -300.0f};  // e.g. kicked by the cursor
     s.fallSpeed = 50.0f;
-    s.swayAmp = 0.0f;
+    s.flutterAmp = 0.0f;
     p.add(s);
-    for (int i = 0; i < 600; ++i) integrateFlakes(p, kFixedDt, 20.0f, i * kFixedDt);
+    WindField air;
+    air.configure({0, 0, 1000, 1000});
+    air.update(0.0f, 20.0f, 0.0f);  // steady 20 px/s wind, no eddies
+    for (int i = 0; i < 600; ++i) integrateFlakes(p, kFixedDt, &air);
     CHECK_NEAR(p.vx[0], 20.0f, 0.01);
     CHECK_NEAR(p.vy[0], 50.0f, 0.01);
 }
@@ -153,12 +158,52 @@ TEST(world_stacked_monitors_do_not_double_spawn) {
 }
 
 TEST(world_hidpi_monitor_gets_bigger_flakes) {
-    World w(3);
-    w.setMonitors({makeMonitor(0, 0, 2000, 1000, 2.0f)});
+    auto meanRadius = [](float scale) {
+        World w(3);
+        w.setMonitors({makeMonitor(0, 0, 2000, 1000, scale)});
+        w.prewarm();
+        const auto& f = w.flakes();
+        double sum = 0;
+        for (std::size_t i = 0; i < f.size(); ++i) sum += f.radius[i];
+        return f.size() ? sum / static_cast<double>(f.size()) : 0.0;
+    };
+    const double r1 = meanRadius(1.0f), r2 = meanRadius(2.0f);
+    REQUIRE(r1 > 0.0);
+    CHECK_NEAR(r2 / r1, 2.0, 0.1);
+}
+
+TEST(world_flakes_are_mostly_small_with_varied_shapes) {
+    World w(4);
+    w.setMonitors({makeMonitor(0, 0, 1920, 1080)});
     w.prewarm();
     const auto& f = w.flakes();
-    REQUIRE(f.size() > 0);
-    for (std::size_t i = 0; i < f.size(); ++i) CHECK(f.radius[i] >= 2.0f);
+    REQUIRE(f.size() > 1000);
+    std::size_t small = 0;
+    bool shapes[4] = {};
+    for (std::size_t i = 0; i < f.size(); ++i) {
+        if (f.radius[i] < 1.8f) ++small;
+        shapes[static_cast<int>(shapeOfSprite(f.sprite[i]))] = true;
+    }
+    CHECK(small > f.size() * 85 / 100);
+    CHECK(shapes[0] && shapes[1] && shapes[2] && shapes[3]);
+}
+
+TEST(wind_field_swirls_and_follows_base_wind) {
+    WindField air;
+    air.configure({0, 0, 2000, 1000});
+    air.update(3.0f, 50.0f, 20.0f);
+    double sumU = 0, sumV2 = 0;
+    int n = 0;
+    for (float y = 0; y < 1000; y += 37) {
+        for (float x = 0; x < 2000; x += 41) {
+            const Vec2 v = air.sample(x, y);
+            sumU += v.x;
+            sumV2 += v.y * v.y;
+            ++n;
+        }
+    }
+    CHECK_NEAR(sumU / n, 50.0, 8.0);  // eddies average out around the wind
+    CHECK(sumV2 / n > 1.0);           // but there are up/down drafts
 }
 
 TEST(world_changing_monitors_culls_offscreen) {
