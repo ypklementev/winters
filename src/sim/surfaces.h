@@ -16,6 +16,9 @@ struct WindowInfo {
     std::uint64_t id = 0;
     RectF rect;            // physical px, overlay space
     bool taskbar = false;  // Shell_TrayWnd / Shell_SecondaryTrayWnd
+    // Rounded top corners (macOS windows): snow lies only on the straight part
+    // of the edge between them. 0 on Windows.
+    float cornerRadius = 0.0f;
 };
 
 struct Span {
@@ -42,6 +45,7 @@ struct Surface {
     RectF rect;  // owner window rect; edge is rect.top
     bool ground = false;
     bool taskbar = false;
+    float cornerRadius = 0.0f;  // see WindowInfo
     float scale = 1.0f;
     Heightmap pile;
     float spillCarry = 0.0f;    // spilled area not yet turned into particles

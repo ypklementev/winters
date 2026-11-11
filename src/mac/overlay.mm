@@ -104,8 +104,10 @@
     _panel.ignoresMouseEvents = YES;
     _panel.hidesOnDeactivate = NO;
     _panel.animationBehavior = NSWindowAnimationBehaviorNone;
-    // Above the menu bar (24) and the Dock (20), below menus (101).
-    _panel.level = NSStatusWindowLevel;
+    // Right below the Dock (20): above every app window, while the Dock, the
+    // menu bar, menus and Control Center stay in front of the snow, so a drift
+    // at the screen bottom never buries the Dock icons.
+    _panel.level = CGWindowLevelForKey(kCGDockWindowLevelKey) - 1;
     _panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary |
                                 NSWindowCollectionBehaviorIgnoresCycle | NSWindowCollectionBehaviorFullScreenAuxiliary;
     _clickThrough = YES;

@@ -140,6 +140,7 @@ void World::setWindows(const std::vector<WindowInfo>& windows) {
         auto it = old.find(w.id);
         if (it == old.end() || used[it->second]) {
             next.push_back(makeSurface(w.id, w.rect, false, w.taskbar));
+            next.back().cornerRadius = w.cornerRadius;
             continue;
         }
         used[it->second] = true;
@@ -167,6 +168,7 @@ void World::setWindows(const std::vector<WindowInfo>& windows) {
             s.rect = w.rect;  // sub-pixel / bottom-only change
         }
         s.taskbar = w.taskbar;
+        s.cornerRadius = w.cornerRadius;
         s.lastSeen = time_;
         next.push_back(std::move(s));
     }
@@ -202,7 +204,9 @@ void World::recomputeVisibility() {
             }
             spans = visibleEdgeSpans(s.rect.left, s.rect.right, s.edgeY(), occ, monitors_, 0.0f);
         } else {
-            spans = visibleEdgeSpans(s.rect.left, s.rect.right, s.edgeY(), windowOccluders, monitors_,
+            // Rounded corners hold no snow: only the straight part of the edge does.
+            const float inset = std::clamp(s.cornerRadius, 0.0f, s.rect.width() * 0.5f);
+            spans = visibleEdgeSpans(s.rect.left + inset, s.rect.right - inset, s.edgeY(), windowOccluders, monitors_,
                                      kMinHeadroom * s.scale);
             windowOccluders.push_back(s.rect);
         }

@@ -5,9 +5,6 @@
 namespace {
 
 constexpr std::uint64_t kMenuBarIdBase = 0x3E2B000000000000ull;
-constexpr std::uint64_t kDockIdBase = 0xD0C0000000000000ull;
-// Thinner insets are an auto-hidden Dock's trigger strip, not a Dock.
-constexpr double kMinDockThickness = 12.0;
 // Windows whose top edge is this close below the menu bar hold no snow.
 constexpr double kMenuBarMargin = 2.0;
 
@@ -72,33 +69,15 @@ std::vector<sim::Monitor> ScreenLayout::monitors() const {
     return out;
 }
 
-void ScreenLayout::appendSystemBars(std::vector<sim::WindowInfo>& out) const {
+void ScreenLayout::appendMenuBars(std::vector<sim::WindowInfo>& out) const {
     std::uint64_t i = 0;
     for (const ScreenDesc& d : screens_) {
-        const CGRect f = d.frame, v = d.visible;
-        const double top = CGRectGetMinY(v) - CGRectGetMinY(f);
+        const CGRect f = d.frame;
+        const double top = CGRectGetMinY(d.visible) - CGRectGetMinY(f);
         if (top > 0.5) {
             sim::WindowInfo w;
             w.id = kMenuBarIdBase + i;
             w.rect = toSim(CGRectMake(f.origin.x, f.origin.y, f.size.width, top + kMenuBarMargin));
-            out.push_back(w);
-        }
-        CGRect dock = CGRectNull;
-        const double bottom = CGRectGetMaxY(f) - CGRectGetMaxY(v);
-        const double left = CGRectGetMinX(v) - CGRectGetMinX(f);
-        const double right = CGRectGetMaxX(f) - CGRectGetMaxX(v);
-        if (bottom >= kMinDockThickness) {
-            dock = CGRectMake(f.origin.x, CGRectGetMaxY(v), f.size.width, bottom);
-        } else if (left >= kMinDockThickness) {
-            dock = CGRectMake(f.origin.x, CGRectGetMinY(v), left, CGRectGetMaxY(f) - CGRectGetMinY(v));
-        } else if (right >= kMinDockThickness) {
-            dock = CGRectMake(CGRectGetMaxX(v), CGRectGetMinY(v), right, CGRectGetMaxY(f) - CGRectGetMinY(v));
-        }
-        if (!CGRectIsNull(dock)) {
-            sim::WindowInfo w;
-            w.id = kDockIdBase + i;
-            w.rect = toSim(dock);
-            w.taskbar = true;
             out.push_back(w);
         }
         ++i;

@@ -30,11 +30,19 @@ struct Win {
     unsigned color;
 };
 
-void FillRect(std::vector<std::uint32_t>& px, int w, int h, sim::RectF r, float upp, unsigned rgb) {
+// Window with rounded top corners of `radius` simulation units.
+void FillRect(std::vector<std::uint32_t>& px, int w, int h, sim::RectF r, float upp, unsigned rgb, float radius = 0) {
     const int x0 = std::max(0, int(r.left / upp)), x1 = std::min(w, int(r.right / upp));
     const int y0 = std::max(0, int(r.top / upp)), y1 = std::min(h, int(r.bottom / upp));
-    for (int y = y0; y < y1; ++y)
-        for (int x = x0; x < x1; ++x) px[size_t(y) * w + x] = rgb;
+    const float rad = radius / upp;
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            const float dy = std::max(0.0f, r.top / upp + rad - (y + 0.5f));
+            const float dx = std::max({0.0f, r.left / upp + rad - (x + 0.5f), (x + 0.5f) - (r.right / upp - rad)});
+            if (dx * dx + dy * dy > rad * rad) continue;
+            px[size_t(y) * w + x] = rgb;
+        }
+    }
 }
 
 }  // namespace
@@ -62,11 +70,13 @@ int main(int argc, const char** argv) {
             {{0, 0, kWidthPt * kScale, 27 * kScale}, 0xFF3A4150},                                    // menu bar
             {{0, (kHeightPt - 70) * kScale, kWidthPt * kScale, kHeightPt * kScale}, 0xFF505868},  // Dock
         };
+        // As the app passes them: the menu bar on top, no Dock (it is drawn in
+        // front of the overlay), windows with rounded corners.
+        const float radius = 10 * kScale;
         std::vector<sim::WindowInfo> infos;
-        infos.push_back({1, wins[2].rect, false});
-        infos.push_back({2, wins[3].rect, true});
-        infos.push_back({3, wins[0].rect, false});  // the dark window is in front
-        infos.push_back({4, wins[1].rect, false});
+        infos.push_back({1, wins[2].rect, false, 0.0f});
+        infos.push_back({3, wins[0].rect, false, radius});  // the dark window is in front
+        infos.push_back({4, wins[1].rect, false, radius});
         world.setWindows(infos);
         world.placeWiper({1000 * kScale, (kHeightPt - 70 - 16) * kScale});
         world.setWiperEnabled(true);
@@ -124,7 +134,7 @@ int main(int argc, const char** argv) {
             const unsigned rr = unsigned(40 + 30 * k), gg = unsigned(70 + 40 * k), bb = unsigned(120 + 50 * k);
             for (int x = 0; x < w; ++x) px[size_t(y) * w + x] = 0xFF000000u | rr << 16 | gg << 8 | bb;
         }
-        for (int i : {1, 0, 3, 2}) FillRect(px, w, h, wins[i].rect, upp, wins[i].color);
+        for (int i : {1, 0}) FillRect(px, w, h, wins[i].rect, upp, wins[i].color, radius);
 
         // Premultiplied BGRA "over" the desktop -> RGBA for the PNG.
         std::vector<std::uint8_t> rgba(size_t(w) * h * 4);
@@ -137,6 +147,18 @@ int main(int argc, const char** argv) {
             rgba[i * 4 + 1] = std::uint8_t(std::lround(std::min(255.0f, sg + dg * (1 - a))));
             rgba[i * 4 + 2] = std::uint8_t(std::lround(std::min(255.0f, sb + db * (1 - a))));
             rgba[i * 4 + 3] = 255;
+        }
+
+        // Menu bar and Dock are in front of the overlay.
+        std::vector<std::uint32_t> chrome(size_t(w) * h, 0);
+        FillRect(chrome, w, h, wins[2].rect, upp, wins[2].color);
+        FillRect(chrome, w, h, {380 * kScale, (kHeightPt - 66) * kScale, 900 * kScale, (kHeightPt - 4) * kScale}, upp,
+                 wins[3].color, 16 * kScale);
+        for (size_t i = 0; i < chrome.size(); ++i) {
+            if (!chrome[i]) continue;
+            rgba[i * 4 + 0] = std::uint8_t(chrome[i] >> 16);
+            rgba[i * 4 + 1] = std::uint8_t(chrome[i] >> 8);
+            rgba[i * 4 + 2] = std::uint8_t(chrome[i]);
         }
 
         CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);

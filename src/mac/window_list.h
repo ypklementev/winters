@@ -19,3 +19,8 @@ struct MacWindow {
 // Windows on the current Space(s), in z-order, without our own, menus, the
 // Dock and other system chrome.
 std::vector<MacWindow> QueryWindows();
+
+// Corner radius of standard windows, points. Not queryable through public
+// API; it grew in macOS 26 (Tahoe), where windows with toolbars are rounder
+// still: those lose a little snow at the ends, which looks fine.
+double WindowCornerRadius();

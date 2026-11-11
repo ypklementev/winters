@@ -45,13 +45,12 @@ public:
 
     std::vector<sim::Monitor> monitors() const;
 
-    // The menu bars and Docks, as windows for the simulation (topmost first).
-    //  - A menu bar hides the top edges of windows pressed against it, as a
-    //    maximised window's top edge on Windows is too close to the screen top.
-    //  - A Dock is a "taskbar": snow lies on its top edge, not on the screen
-    //    bottom behind it. Its exact width needs the Accessibility permission,
-    //    so it spans the whole screen, like the Windows taskbar.
-    void appendSystemBars(std::vector<sim::WindowInfo>& out) const;
+    // The menu bars, as windows for the simulation (above every other window):
+    // a menu bar hides the top edges of windows pressed against it, as a
+    // maximised window's top edge on Windows is too close to the screen top.
+    // The Dock is not passed on purpose: the overlay sits right below it, so
+    // snow piles up at the screen bottom and the Dock stands in front of it.
+    void appendMenuBars(std::vector<sim::WindowInfo>& out) const;
 
     // Cocoa (NSEvent/NSScreen) <-> global display coordinates.
     static CGPoint cocoaToGlobal(NSPoint p);

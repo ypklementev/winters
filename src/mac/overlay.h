@@ -1,5 +1,5 @@
-// Transparent, click-through window over one screen, above normal windows,
-// the Dock and the menu bar, on every Space (including full-screen apps).
+// Transparent, click-through window over one screen, above app windows and
+// below the Dock and the menu bar, on every Space (including full-screen apps).
 // A window can't span displays when "Displays have separate Spaces" is on,
 // so there is one overlay per screen.
 #pragma once

@@ -263,11 +263,13 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
     _macWindows = std::move(list);
 
     _windows.clear();
-    _layout.appendSystemBars(_windows);  // above every normal window
+    _layout.appendMenuBars(_windows);  // above every normal window
+    const float radius = static_cast<float>(WindowCornerRadius() * _layout.scale());
     for (const MacWindow& w : _macWindows) {
         sim::WindowInfo info;
         info.id = w.id;
         info.rect = _layout.toSim(w.frame);
+        info.cornerRadius = radius;
         _windows.push_back(info);
     }
     _world.setWindows(_windows);
@@ -612,7 +614,7 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
     NSAlert* alert = [NSAlert new];
     alert.messageText = @"WinTers — как пользоваться";
     alert.informativeText =
-        @"Снег падает и копится на верхних краях окон, на Dock и внизу экрана.\n\n"
+        @"Снег падает и копится на верхних краях окон и внизу экрана, за Dock.\n\n"
         @"• Смахнуть снег — проведите курсором по сугробу (быстрый взмах сбивает и снежки).\n\n"
         @"• Снежный ком — зажмите Control + Option и ведите курсор вдоль сугроба: снег сгребается "
         @"в шарик, который катится перед курсором и растёт. Можно и нажать на сугроб с Control + Option "

@@ -11,6 +11,10 @@ bool IsLedgeLayer(int layer) { return layer >= 0 && layer <= 8; }
 
 }  // namespace
 
+double WindowCornerRadius() {
+    return NSProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26 ? 16.0 : 10.0;
+}
+
 std::vector<MacWindow> QueryWindows() {
     std::vector<MacWindow> out;
     CFArrayRef raw = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
