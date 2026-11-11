@@ -171,3 +171,28 @@ TEST(piles_stacked_monitor_bottom_is_not_a_floor) {
         if (s.edgeY() == 1000.0f) CHECK(s.pile.totalArea() > 0.0f);
     }
 }
+
+TEST(rounded_corners_hold_no_snow) {
+    sim::World w(11);
+    w.setMonitors({th::makeMonitor(0, 0, 1200, 800)});
+    sim::WindowInfo win = th::makeWindow(1, 300, 300, 700, 600);
+    win.cornerRadius = 20.0f;
+    w.setWindows({win});
+    w.prewarm();
+    th::runSeconds(w, 40.0f);
+
+    const sim::Surface* s = th::findSurface(w, 1);
+    REQUIRE(s != nullptr);
+    float middle = 0.0f;
+    for (std::size_t i = 0; i < s->pile.size(); ++i) {
+        const float x = s->cellCenterX(i);
+        if (x < 320.0f || x > 680.0f) {
+            CHECK(!s->pile.visible(i));
+            CHECK(s->pile.height(i) == 0.0f);
+            CHECK(s->lineAt(x) == sim::kNoSurface);
+        } else if (x > 400.0f && x < 600.0f) {
+            middle = std::max(middle, s->pile.height(i));
+        }
+    }
+    CHECK(middle > 1.0f);
+}
