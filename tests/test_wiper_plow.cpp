@@ -248,6 +248,7 @@ TEST(snowballs_dropped_from_high_shatter_into_snow) {
     movePointer(w, {800, 20}, {800, 20}, 0.05f, false);  // let go: ~380 px fall
     idlePointer(w, {10, 10}, 1.0f);
     CHECK(findBall(w.snowballs(), ids[0]) < 0);
+    CHECK(w.snowballs().empty());  // all of it turns into loose snow, no chunks
     CHECK(w.flakes().size() > flakesBefore + 10);
 }
 
@@ -260,6 +261,12 @@ TEST(snowballs_gently_stacked_stick_and_move_together) {
     const int top = findBall(balls, ids[1]);
     REQUIRE(top >= 0 && findBall(balls, ids[0]) >= 0);
     CHECK(balls[static_cast<std::size_t>(top)].parent == ids[0]);
+    {
+        // Stuck balls sink a little into each other.
+        const Snowball& t = balls[static_cast<std::size_t>(top)];
+        const Snowball& b = balls[static_cast<std::size_t>(findBall(balls, ids[0]))];
+        CHECK(length(t.pos - b.pos) < t.radius + b.radius - 0.15f * std::min(t.radius, b.radius));
+    }
     // Drag the base: the top ball comes along.
     const Snowball base = balls[static_cast<std::size_t>(findBall(balls, ids[0]))];
     const Vec2 dest{base.pos.x + 200.0f, base.pos.y - 10.0f};

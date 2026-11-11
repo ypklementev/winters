@@ -63,8 +63,9 @@ constexpr std::size_t kMaxBalls = 40;
 constexpr float kBallMaxThrow = 2500.0f;
 constexpr float kShatterSpeed = 900.0f;   // impact speed that breaks a ball (~220 px drop)
 constexpr float kStickDelay = 0.15f;      // s a ball must rest on another before sticking
+constexpr float kMergeDepth = 0.2f;   // stuck balls sink this much (of the smaller radius) into each other
+constexpr float kMergeTime = 0.25f;   // s, time constant of that settling
 constexpr float kStickSpeed = 40.0f;      // max relative speed to count as resting
-constexpr float kChunkMinRadius = 14.0f;  // bigger balls also break into a couple of chunks
 
 // Visual size of a clump carrying `mass` px^2 of snow.
 float debrisRadius(float mass, float scale) {
@@ -1081,6 +1082,18 @@ void World::followParents() {
 }
 
 void World::stickResting(float dt) {
+    // Stuck balls slowly settle into the one below, as packed snow does.
+    for (Snowball& a : balls_) {
+        if (a.parent == 0 || a.held) continue;
+        const int k = findBall(balls_, a.parent);
+        if (k < 0) continue;
+        const Snowball& b = balls_[static_cast<std::size_t>(k)];
+        const float target = a.radius + b.radius - kMergeDepth * std::min(a.radius, b.radius);
+        const float len = length(a.offset);
+        if (len <= target + 0.01f || len < 1e-3f) continue;
+        const float next = std::max(target, len - (len - target) * (1.0f - std::exp(-dt / kMergeTime)) - 0.5f * a.scale * dt);
+        a.offset = a.offset * (next / len);
+    }
     for (Snowball& a : balls_) {
         if (a.held || a.parent != 0) continue;
         std::uint32_t on = 0;
@@ -1121,27 +1134,18 @@ void World::shatter(std::size_t i) {
     const float s = b.scale;
     float mass = kPi * b.radius * b.radius / kBallGrow;  // the snow it was rolled from
 
-    // A big ball breaks into a couple of chunks plus a spray of snow.
-    if (b.radius > kChunkMinRadius * s) {
-        for (int k = 0; k < 2; ++k) {
-            const float dir = k == 0 ? -1.0f : 1.0f;
-            Snowball c;
-            c.scale = s;
-            c.radius = b.radius * rng_.uniform(0.32f, 0.42f);
-            c.pos = c.prevPos = b.pos + Vec2{dir * b.radius * 0.35f, -b.radius * 0.2f};
-            c.vel = Vec2{dir * rng_.uniform(120.0f, 260.0f), -rng_.uniform(150.0f, 300.0f)} * s + Vec2{b.vel.x * 0.3f, 0.0f};
-            mass -= kPi * c.radius * c.radius / kBallGrow;
-            addBall(c);
-        }
-    }
     if (mass <= 0.0f) return;
-    const float unit = std::max(1.2f * s * s, mass / 400.0f);
+    // The whole ball bursts into loose snow: many small flakes, the outer
+    // ones flying fastest, all of it settling back as fresh powder.
+    const float unit = std::max(0.8f * s * s, mass / 900.0f);
     for (float m = mass; m > 0.0f; m -= unit) {
         const float ang = rng_.uniform(0.0f, 2.0f * kPi);
-        const float rr = std::sqrt(rng_.uniform()) * b.radius;
+        const float u = std::sqrt(rng_.uniform());
+        const float rr = u * b.radius;
         const Vec2 dir{std::cos(ang), std::sin(ang)};
         const Vec2 p = b.pos + dir * rr;
-        const Vec2 v = dir * (rng_.uniform(60.0f, 260.0f) * s) + Vec2{b.vel.x * 0.2f, -rng_.uniform(40.0f, 200.0f) * s};
+        const Vec2 v = dir * (rng_.uniform(40.0f, 140.0f) + 180.0f * u) * s +
+                       Vec2{b.vel.x * 0.2f, -rng_.uniform(40.0f, 220.0f) * s};
         addDebris(p.x, p.y, v, std::min(unit, m), s);
     }
 }

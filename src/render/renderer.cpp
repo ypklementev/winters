@@ -249,6 +249,8 @@ void Renderer::buildInstances(const sim::World& world) {
 
     balls_.clear();
     for (const sim::Snowball& b : world.snowballs()) balls_.push_back({b.pos.x, b.pos.y, b.radius, b.angle});
+    // Lower balls first, so a snowman's upper balls overlap the ones they sit in.
+    std::sort(balls_.begin(), balls_.end(), [](const BallInstance& a, const BallInstance& b) { return a.y > b.y; });
 
     // Smooth outline: corner heights are averages of neighbouring cells;
     // ends next to a hidden/absent cell are rounded down.

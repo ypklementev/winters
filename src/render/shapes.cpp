@@ -64,24 +64,50 @@ std::vector<Shape> Build(const sim::World& world) {
                            0.12f, 1.0f, 0.0f, 1.0f, 0.0f));
     }
 
-    // The wiper: arm, blade holder, rubber blade and the pivot cap.
+    // The wiper: arm, blade holder, rubber blade and the pivot cap. While it
+    // moves, the outer half of the blade flexes back against the motion and
+    // fading copies trail behind it (motion blur), like a real wiper's smear.
     const sim::Wiper& wp = world.wiper();
     if (wp.enabled()) {
         const float sc = wp.scale();
         const sim::Vec2 pv = wp.pivot();
-        const sim::Vec2 tip = wp.tip();
-        const sim::Vec2 bladeStart = wp.bladeStart();
-        const float screenAngle = -wp.angle();  // direction (cos a, -sin a)
-        auto capsule = [&](sim::Vec2 a, sim::Vec2 b, float halfWidth, float r, float g, float bl, float shine) {
-            const float half = sim::length(b - a) * 0.5f + halfWidth;
-            out.push_back(mk((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f, half, halfWidth, screenAngle, r, g, bl,
-                               1.0f, shine, 0.0f, 0.0f));
+        const float L = wp.length();
+        const float w = wp.angularVelocity();
+        const float lag = std::clamp(-w * 0.011f, -0.07f, 0.07f);
+        auto capsule = [&](sim::Vec2 a, sim::Vec2 b, float halfWidth, float r, float g, float bl, float shine,
+                           float alpha) {
+            const sim::Vec2 d = b - a;
+            const float half = sim::length(d) * 0.5f + halfWidth;
+            out.push_back(mk((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f, half, halfWidth, std::atan2(d.y, d.x), r, g,
+                             bl, alpha, shine, 0.0f, 0.0f));
         };
-        // Blade holder sits slightly offset from the arm, like on a car.
-        const sim::Vec2 n = sim::Vec2{-std::sin(wp.angle()), -std::cos(wp.angle())} * (3.0f * sc);
-        capsule(bladeStart + n, tip + n, 2.0f * sc, 0.16f, 0.17f, 0.19f, 0.35f);   // holder
-        capsule(bladeStart, tip, wp.bladeHalfWidth(), 0.05f, 0.05f, 0.06f, 0.18f);  // rubber
-        capsule(pv, tip, 2.6f * sc, 0.13f, 0.14f, 0.16f, 0.45f);                    // arm
+        auto drawWiper = [&](float angle, float bend, float alpha) {
+            const sim::Vec2 d0 = sim::Wiper::direction(angle);
+            const sim::Vec2 d1 = sim::Wiper::direction(angle + bend);
+            const sim::Vec2 p1 = pv + d0 * (L * sim::Wiper::kBladeStart);  // blade start
+            const sim::Vec2 pm = pv + d0 * (L * 0.62f);                      // flex point
+            const sim::Vec2 p2 = pm + d1 * (L * 0.38f);                      // tip
+            // Holder sits slightly offset from the arm, like on a car.
+            const sim::Vec2 n0 = sim::Vec2{d0.y, -d0.x} * (3.0f * sc);
+            const sim::Vec2 n1 = sim::Vec2{d1.y, -d1.x} * (3.0f * sc);
+            capsule(p1 + n0, pm + n0, 2.0f * sc, 0.16f, 0.17f, 0.19f, 0.35f, alpha);
+            capsule(pm + n1, p2 + n1, 2.0f * sc, 0.16f, 0.17f, 0.19f, 0.35f, alpha);
+            capsule(p1, pm, wp.bladeHalfWidth(), 0.05f, 0.05f, 0.06f, 0.18f, alpha);
+            capsule(pm, p2, wp.bladeHalfWidth(), 0.05f, 0.05f, 0.06f, 0.18f, alpha);
+            capsule(pv, pm, 2.6f * sc, 0.13f, 0.14f, 0.16f, 0.45f, alpha);
+            capsule(pm, p2, 2.6f * sc, 0.13f, 0.14f, 0.16f, 0.45f, alpha);
+        };
+        // Trail: copies at earlier angles over the last ~35 ms, fading out.
+        constexpr int kTrail = 7;
+        constexpr float kTrailTime = 0.035f;
+        if (std::abs(w) > 0.4f) {
+            for (int k = kTrail; k >= 1; --k) {
+                const float t = static_cast<float>(k) / static_cast<float>(kTrail);
+                const float alpha = 0.26f * (1.0f - t) + 0.04f;
+                drawWiper(wp.angle() - w * kTrailTime * t, lag * (1.0f - 0.5f * t), alpha);
+            }
+        }
+        drawWiper(wp.angle(), lag, 1.0f);
         const float pr = wp.pivotRadius();
         out.push_back(mk(pv.x, pv.y, pr * 0.75f, pr * 0.75f, 0.0f, 0.2f, 0.21f, 0.24f, 1.0f, 0.5f, 0.0f, 0.0f));
         out.push_back(mk(pv.x, pv.y, pr * 0.32f, pr * 0.32f, 0.0f, 0.08f, 0.08f, 0.09f, 1.0f, 0.2f, 0.0f, 0.0f));
