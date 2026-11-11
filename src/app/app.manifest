@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity type="win32" name="WinFlake" version="0.1.0.0" processorArchitecture="*"/>
-  <description>WinFlake - snow on your desktop</description>
+  <assemblyIdentity type="win32" name="WinTers" version="0.1.0.0" processorArchitecture="*"/>
+  <description>WinTers - snow on your desktop</description>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>

@@ -23,7 +23,7 @@
 
 namespace {
 
-constexpr wchar_t kControlClass[] = L"WinFlake.Control";
+constexpr wchar_t kControlClass[] = L"WinTers.Control";
 constexpr UINT WM_APP_TRAY = WM_APP + 1;
 constexpr int kHotkeyPause = 1;
 
@@ -84,7 +84,7 @@ bool App::createControlWindow() {
     if (!RegisterClassExW(&wc)) return false;
     // A real (hidden) top-level window rather than HWND_MESSAGE: it must be able
     // to become foreground for TrackPopupMenu and receive broadcast messages.
-    control_ = CreateWindowExW(WS_EX_TOOLWINDOW, kControlClass, L"WinFlake", WS_POPUP, 0, 0, 0, 0,
+    control_ = CreateWindowExW(WS_EX_TOOLWINDOW, kControlClass, L"WinTers", WS_POPUP, 0, 0, 0, 0,
                                nullptr, nullptr, instance_, this);
     return control_ != nullptr;
 }
@@ -275,7 +275,7 @@ void App::checkAutoPause() {
 }
 
 void App::updateTooltip() {
-    std::wstring tip = L"WinFlake — ";
+    std::wstring tip = L"WinTers — ";
     if (!paused()) {
         tip += L"идёт снег";
     } else if (pauseReasons_ & kPauseUser) {
@@ -308,7 +308,7 @@ void App::showHelp() {
                 L"• Дворник (в меню) смахивает снег. Его ось можно перетащить мышкой.\n\n"
                 L"• Ctrl + Alt + S — пауза / продолжить.\n\n"
                 L"• «Лопата» в меню убирает весь снег.",
-                L"WinFlake — как пользоваться", MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
+                L"WinTers — как пользоваться", MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
     KillTimer(control_, kTimerModalTick);
 }
 
@@ -317,7 +317,7 @@ void App::showTrayMenu(POINT at) {
     HMENU snow = CreatePopupMenu();
     HMENU wind = CreatePopupMenu();
 
-    std::wstring title = L"WinFlake";
+    std::wstring title = L"WinTers";
     if (pauseReasons_ & kPauseBattery) title += L" — пауза (энергосбережение)";
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, title.c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -557,11 +557,12 @@ int App::run(HINSTANCE instance) {
     taskbarCreatedMsg_ = RegisterWindowMessageW(L"TaskbarCreated");
 
     settings_ = LoadSettings();
+    MigrateAutostart();
     applySettings();
 
     const UINT dpi = GetDpiForWindow(control_);
     trayIcon_ = CreateSnowflakeIcon(GetSystemMetricsForDpi(SM_CXSMICON, dpi));
-    tray_.create(control_, WM_APP_TRAY, trayIcon_, L"WinFlake");
+    tray_.create(control_, WM_APP_TRAY, trayIcon_, L"WinTers");
 
     hotkeyOk_ = RegisterPauseHotkey(control_, kHotkeyPause);
     WTSRegisterSessionNotification(control_, NOTIFY_FOR_THIS_SESSION);
@@ -577,7 +578,7 @@ int App::run(HINSTANCE instance) {
         swprintf_s(text, ARRAYSIZE(text),
                    L"Не удалось инициализировать Direct3D/DirectComposition.\nКод ошибки (HRESULT): 0x%08lX",
                    static_cast<unsigned long>(hr));
-        MessageBoxW(nullptr, text, L"WinFlake", MB_ICONERROR | MB_OK);
+        MessageBoxW(nullptr, text, L"WinTers", MB_ICONERROR | MB_OK);
         return 1;
     }
     SetTimer(control_, kTimerTopmost, 2000, nullptr);

@@ -1,4 +1,4 @@
-# WinFlake
+# WinTers
 
 Снег на рабочем столе Windows. Он падает поверх всех окон и ложится сугробами на верхние края окон, на панель задач и на низ экрана.
 Снег можно смахнуть курсором или слепить из него снежки и снеговика. Клики проходят сквозь снег, поэтому работать он не мешает.
@@ -31,7 +31,7 @@
 - **Меню в трее.** Пауза, снегопад (лёгкий / ровный / метель, «без ограничений»), ветер (штиль / влево / вправо и сила), «Лопата» (убрать весь снег), автозапуск.
 - **Горячая клавиша паузы:** **Ctrl + Alt + S**.
 - **Автопауза.** Снег сам ставится на паузу при блокировке и сне, а также на батарее в режиме энергосбережения.
-- **Настройки** хранятся в `%APPDATA%\WinFlake\settings.ini`.
+- **Настройки** хранятся в `%APPDATA%\WinTers\settings.ini`. Настройки и автозапуск от старой версии (WinFlake) переносятся сами.
 
 ## Требования
 
@@ -50,7 +50,7 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure   # тесты симуляции
 ```
 
-Готовый файл: `build\Release\WinFlake.exe`. CRT слинкован статически, поэтому VC++ Redistributable не нужен.
+Готовый файл: `build\Release\WinTers.exe`. CRT слинкован статически, поэтому VC++ Redistributable не нужен.
 
 ## Сборка без Windows (macOS / Linux)
 
@@ -70,7 +70,7 @@ ctest --test-dir build/host --output-on-failure
 brew install mingw-w64            # macOS (~1.5 ГБ); на Linux: apt install mingw-w64
 cmake -S . -B build/win -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake
 cmake --build build/win
-x86_64-w64-mingw32-strip build/win/WinFlake.exe   # необязательно: ~2.5 МБ → ~0.4 МБ
+x86_64-w64-mingw32-strip build/win/WinTers.exe   # необязательно: ~2.5 МБ → ~0.4 МБ
 ```
 
 Exe собирается статически, его можно сразу копировать на Windows.
@@ -88,12 +88,12 @@ for e in vs_disc:vert vs_pile:vert ps_flake:frag ps_ball:frag ps_pile:frag; do
 ### GitHub Actions
 
 `.github/workflows/build.yml` на каждый push:
-- собирает `WinFlake.exe` на MSVC (артефакт **WinFlake-x64**);
+- собирает `WinTers.exe` на MSVC (артефакт **WinTers-x64**);
 - гоняет тесты симуляции на MSVC и на Linux с ASan/UBSan.
 
 ## Запуск
 
-Запусти `WinFlake.exe`. Окна приложение не открывает, в трее появляется снежинка, а меню открывается правой кнопкой мыши по ней.
+Запусти `WinTers.exe`. Окна приложение не открывает, в трее появляется снежинка, а меню открывается правой кнопкой мыши по ней.
 Второй экземпляр не запускается.
 
 Exe не подписан, поэтому Windows SmartScreen может показать «Система Windows защитила ваш компьютер». Нажми **Подробнее**, затем **Выполнить в любом случае**.

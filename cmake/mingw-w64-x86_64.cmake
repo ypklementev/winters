@@ -1,4 +1,4 @@
-# Cross-compile WinFlake for Windows x64 from macOS/Linux with mingw-w64.
+# Cross-compile WinTers for Windows x64 from macOS/Linux with mingw-w64.
 #   brew install mingw-w64
 #   cmake -S . -B build/win -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake
 #   cmake --build build/win

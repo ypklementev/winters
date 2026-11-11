@@ -6,8 +6,19 @@
 
 namespace {
 constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-constexpr wchar_t kValue[] = L"WinFlake";
+constexpr wchar_t kValue[] = L"WinTers";
+constexpr wchar_t kOldValue[] = L"WinFlake";  // the app's former name
 }  // namespace
+
+void MigrateAutostart() {
+    DWORD size = 0;
+    if (RegGetValueW(HKEY_CURRENT_USER, kRunKey, kOldValue, RRF_RT_REG_SZ, nullptr, nullptr, &size) !=
+        ERROR_SUCCESS) {
+        return;
+    }
+    RegDeleteKeyValueW(HKEY_CURRENT_USER, kRunKey, kOldValue);
+    SetAutostart(true);  // same choice, under the new name and this exe's path
+}
 
 bool IsAutostartEnabled() {
     DWORD size = 0;

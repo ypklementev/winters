@@ -6,7 +6,7 @@
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     // One instance per user session.
-    HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\WinFlake.SingleInstance");
+    HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\WinTers.SingleInstance");
     if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
         CloseHandle(mutex);
         return 0;

@@ -29,7 +29,7 @@ HRESULT compile(const char* entry, const char* target, ComPtr<ID3DBlob>& out) {
     pD3DCompile d3dCompile = loadD3DCompile();
     if (!d3dCompile) return HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
     ComPtr<ID3DBlob> errors;
-    HRESULT hr = d3dCompile(shaders::kSource, sizeof(shaders::kSource) - 1, "winflake", nullptr, nullptr,
+    HRESULT hr = d3dCompile(shaders::kSource, sizeof(shaders::kSource) - 1, "winters", nullptr, nullptr,
                             entry, target, D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, out.put(), errors.put());
     if (FAILED(hr) && errors) {
         OutputDebugStringA(static_cast<const char*>(errors->GetBufferPointer()));

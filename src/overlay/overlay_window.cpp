@@ -2,7 +2,7 @@
 
 namespace {
 
-constexpr wchar_t kClassName[] = L"WinFlake.Overlay";
+constexpr wchar_t kClassName[] = L"WinTers.Overlay";
 
 constexpr DWORD kExStyle = WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT | WS_EX_LAYERED |
                            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
@@ -25,7 +25,7 @@ bool OverlayWindow::create(HINSTANCE instance, const RECT& r) {
 
     rect_ = r;
     clickThrough_ = true;
-    hwnd_ = CreateWindowExW(kExStyle, kClassName, L"WinFlake", WS_POPUP, r.left, r.top,
+    hwnd_ = CreateWindowExW(kExStyle, kClassName, L"WinTers", WS_POPUP, r.left, r.top,
                             r.right - r.left, r.bottom - r.top, nullptr, nullptr, instance, this);
     if (!hwnd_) return false;
 

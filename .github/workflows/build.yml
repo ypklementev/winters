@@ -22,8 +22,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WinFlake-x64
-          path: build/Release/WinFlake.exe
+          name: WinTers-x64
+          path: build/Release/WinTers.exe
           if-no-files-found: error
 
   sim-tests-linux:

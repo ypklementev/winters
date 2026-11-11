@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(WinFlake VERSION 0.1.0 LANGUAGES CXX)
+project(WinTers VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,7 +10,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
 
-option(WINFLAKE_BUILD_TESTS "Build sim unit tests" ON)
+option(WINTERS_BUILD_TESTS "Build sim unit tests" ON)
 
 # Static CRT: a single self-contained exe, no VC++ redistributable needed.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -24,7 +24,7 @@ endif()
 # ---------------------------------------------------------------------------
 # sim: platform-independent simulation (builds on macOS/Linux too)
 # ---------------------------------------------------------------------------
-add_library(winflake_sim STATIC
+add_library(winters_sim STATIC
     src/sim/flakes.cpp
     src/sim/heightmap.cpp
     src/sim/surfaces.cpp
@@ -33,18 +33,18 @@ add_library(winflake_sim STATIC
     src/sim/wiper.cpp
     src/sim/world.cpp
 )
-target_include_directories(winflake_sim PUBLIC src)
+target_include_directories(winters_sim PUBLIC src)
 
 # Procedural flake sprite atlas: pure C++ too, so it is tested on any host.
-add_library(winflake_atlas STATIC src/render/flake_atlas.cpp src/render/shapes.cpp)
-target_link_libraries(winflake_atlas PUBLIC winflake_sim)
+add_library(winters_atlas STATIC src/render/flake_atlas.cpp src/render/shapes.cpp)
+target_link_libraries(winters_atlas PUBLIC winters_sim)
 
 # ---------------------------------------------------------------------------
-# WinFlake.exe (Windows only: MSVC or MinGW cross-compile)
+# WinTers.exe (Windows only: MSVC or MinGW cross-compile)
 # ---------------------------------------------------------------------------
 if(WIN32)
     enable_language(RC)
-    add_executable(WinFlake WIN32
+    add_executable(WinTers WIN32
         src/app/main.cpp
         src/app/app.cpp
         src/app/tray.cpp
@@ -60,27 +60,27 @@ if(WIN32)
         src/render/device.cpp
         src/render/renderer.cpp
     )
-    target_link_libraries(WinFlake PRIVATE
-        winflake_sim
-        winflake_atlas
+    target_link_libraries(WinTers PRIVATE
+        winters_sim
+        winters_atlas
         d3d11 dxgi dcomp dwmapi shcore user32 gdi32 shell32 ole32 uuid advapi32 wtsapi32
     )
-    target_compile_definitions(WinFlake PRIVATE
+    target_compile_definitions(WinTers PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
         _WIN32_WINNT=0x0A00 WINVER=0x0A00 NTDDI_VERSION=0x0A000007
     )
     if(MSVC)
         # The manifest comes from resources.rc; don't let link.exe add another.
-        target_link_options(WinFlake PRIVATE /MANIFEST:NO)
+        target_link_options(WinTers PRIVATE /MANIFEST:NO)
     else()
-        target_link_options(WinFlake PRIVATE -municode -static -static-libgcc -static-libstdc++)
+        target_link_options(WinTers PRIVATE -municode -static -static-libgcc -static-libstdc++)
     endif()
 endif()
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
-if(WINFLAKE_BUILD_TESTS)
+if(WINTERS_BUILD_TESTS)
     enable_testing()
     add_executable(sim_tests
         tests/test_main.cpp
@@ -93,7 +93,7 @@ if(WINFLAKE_BUILD_TESTS)
         tests/test_atlas.cpp
         tests/test_wiper_plow.cpp
     )
-    target_link_libraries(sim_tests PRIVATE winflake_atlas)
+    target_link_libraries(sim_tests PRIVATE winters_atlas)
     target_include_directories(sim_tests PRIVATE tests)
     if(MINGW)
         target_link_options(sim_tests PRIVATE -static)

@@ -1,4 +1,4 @@
-// %APPDATA%\WinFlake\settings.ini persistence.
+// %APPDATA%\WinTers\settings.ini persistence.
 #pragma once
 
 #include "sim/settings_model.h"
