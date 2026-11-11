@@ -10,30 +10,11 @@
 
 #include "render/com_ptr.h"
 #include "render/device.h"
+#include "render/instances.h"
 
 namespace sim {
 class World;
 }
-
-struct FlakeInstance {
-    float x, y, radius, alpha;
-    float angle, squash, sprite, gain;
-};
-
-struct BallInstance {
-    float x, y, radius, angle;
-};
-
-struct ShapeInstance {
-    float cx, cy, halfLength, halfWidth;
-    float angle, r, g, b;
-    float alpha, shine, type, pad;  // type: 0 capsule, 1 triangle, 2 trapezoid
-};
-
-struct PileInstance {
-    float x0, x1, base, unused;
-    float hLeft, hRight;
-};
 
 class Renderer {
 public:
@@ -57,7 +38,6 @@ private:
     HRESULT createAtlas();
     // Grows (if needed) and fills a dynamic vertex buffer.
     HRESULT upload(DynamicBuffer& b, const void* data, size_t bytes);
-    void buildInstances(const sim::World& world);
 
     GpuContext gpu_;
     ComPtr<ID3D11VertexShader> flakeVs_, ballVs_, pileVs_, shapeVs_;
@@ -70,10 +50,7 @@ private:
     ComPtr<ID3D11RasterizerState> raster_;
     DynamicBuffer flakeBuf_, ballBuf_, pileBuf_, shapeBuf_;
 
-    std::vector<FlakeInstance> flakes_;
-    std::vector<BallInstance> balls_;
+    render::FrameInstances frame_;
     LARGE_INTEGER startTime_{};
     LARGE_INTEGER qpcFreq_{};
-    std::vector<PileInstance> piles_;
-    std::vector<ShapeInstance> shapes_;
 };

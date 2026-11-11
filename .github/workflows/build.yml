@@ -46,6 +46,24 @@ jobs:
             dist/WinTers_TestCert.cer
           if-no-files-found: error
 
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Universal (arm64 + x86_64) WinTers.app, ad-hoc signed, as .dmg and .zip;
+      # build.sh also runs the sim tests.
+      - name: Build app + DMG
+        run: ./build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinTers-macOS
+          path: |
+            dist/WinTers_*_macOS.dmg
+            dist/WinTers_*_macOS.zip
+          if-no-files-found: error
+
   sim-tests-linux:
     runs-on: ubuntu-latest
     steps:

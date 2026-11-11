@@ -7,7 +7,6 @@
 #include <cstring>
 
 #include "render/flake_atlas.h"
-#include "render/shapes.h"
 #include "render/shaders.h"
 #include "sim/world.h"
 
@@ -230,68 +229,17 @@ HRESULT Renderer::upload(DynamicBuffer& b, const void* data, size_t bytes) {
     return S_OK;
 }
 
-void Renderer::buildInstances(const sim::World& world) {
-    const sim::FlakePool& f = world.flakes();
-    flakes_.resize(f.size());
-    for (size_t i = 0; i < f.size(); ++i) {
-        float r = f.radius[i];
-        float alpha = f.alpha[i];
-        // Sub-pixel quads may not cover any pixel centre: draw at 1 px and fade
-        // by the area ratio instead, which keeps the perceived brightness.
-        if (r < 1.0f) {
-            alpha *= r * r;
-            r = 1.0f;
-        }
-        // Minified sprites lose coverage in the mips; boost small ones a bit.
-        const float gain = std::clamp(2.0f - 0.25f * r, 1.0f, 1.8f);
-        flakes_[i] = {f.x[i], f.y[i], r, alpha, f.angle[i], f.squash(i), static_cast<float>(f.sprite[i]), gain};
-    }
-
-    balls_.clear();
-    for (const sim::Snowball& b : world.snowballs()) balls_.push_back({b.pos.x, b.pos.y, b.radius, b.angle});
-    // Lower balls first, so a snowman's upper balls overlap the ones they sit in.
-    std::sort(balls_.begin(), balls_.end(), [](const BallInstance& a, const BallInstance& b) { return a.y > b.y; });
-
-    // Smooth outline: corner heights are averages of neighbouring cells;
-    // ends next to a hidden/absent cell are rounded down.
-    piles_.clear();
-    constexpr float kMin = 0.05f;
-    for (const sim::Surface& s : world.surfaces()) {
-        const sim::Heightmap& hm = s.pile;
-        const size_t n = hm.size();
-        const float cw = hm.cellWidth();
-        const auto& h = hm.heights();
-        for (size_t i = 0; i < n; ++i) {
-            if (!hm.visible(i)) continue;
-            const bool leftOpen = i == 0 || !hm.visible(i - 1);
-            const bool rightOpen = i + 1 >= n || !hm.visible(i + 1);
-            const float hl = leftOpen ? h[i] * 0.5f : (h[i - 1] + h[i]) * 0.5f;
-            const float hr = rightOpen ? h[i] * 0.5f : (h[i] + h[i + 1]) * 0.5f;
-            if (h[i] < kMin && hl < kMin && hr < kMin) continue;
-            const float x0 = s.rect.left + static_cast<float>(i) * cw;
-            piles_.push_back({x0, x0 + cw, s.edgeY(), 0.0f, hl, hr});
-        }
-    }
-
-    // Wiper and snowman decorations (built in pure C++, see render/shapes.cpp).
-    shapes_.clear();
-    for (const shapes::Shape& sh : shapes::Build(world)) {
-        shapes_.push_back({sh.cx, sh.cy, sh.halfLength, sh.halfWidth, sh.angle, sh.r, sh.g, sh.b, sh.alpha, sh.shine,
-                           static_cast<float>(sh.type), 0.0f});
-    }
-}
-
 Renderer::Result Renderer::render(const sim::World& world) {
     if (!ready()) return Result::Failed;
     ID3D11DeviceContext* ctx = gpu_.context();
-    buildInstances(world);
+    frame_.build(world);
 
     HRESULT hr = S_OK;
     auto fail = [&](HRESULT e) { return gpu_.isDeviceLost(e) ? Result::DeviceLost : Result::Failed; };
-    if (FAILED(hr = upload(pileBuf_, piles_.data(), piles_.size() * sizeof(PileInstance)))) return fail(hr);
-    if (FAILED(hr = upload(ballBuf_, balls_.data(), balls_.size() * sizeof(BallInstance)))) return fail(hr);
-    if (FAILED(hr = upload(flakeBuf_, flakes_.data(), flakes_.size() * sizeof(FlakeInstance)))) return fail(hr);
-    if (FAILED(hr = upload(shapeBuf_, shapes_.data(), shapes_.size() * sizeof(ShapeInstance)))) return fail(hr);
+    if (FAILED(hr = upload(pileBuf_, frame_.piles.data(), frame_.piles.size() * sizeof(render::PileInstance)))) return fail(hr);
+    if (FAILED(hr = upload(ballBuf_, frame_.balls.data(), frame_.balls.size() * sizeof(render::BallInstance)))) return fail(hr);
+    if (FAILED(hr = upload(flakeBuf_, frame_.flakes.data(), frame_.flakes.size() * sizeof(render::FlakeInstance)))) return fail(hr);
+    if (FAILED(hr = upload(shapeBuf_, frame_.shapes.data(), frame_.shapes.size() * sizeof(render::ShapeInstance)))) return fail(hr);
 
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
@@ -333,10 +281,10 @@ Renderer::Result Renderer::render(const sim::World& world) {
         ctx->PSSetShader(p, nullptr, 0);
         ctx->DrawInstanced(4, static_cast<UINT>(count), 0, 0);
     };
-    draw(pileBuf_, sizeof(PileInstance), piles_.size(), pileLayout_.get(), pileVs_.get(), pilePs_.get());
-    draw(ballBuf_, sizeof(BallInstance), balls_.size(), ballLayout_.get(), ballVs_.get(), ballPs_.get());
-    draw(shapeBuf_, sizeof(ShapeInstance), shapes_.size(), shapeLayout_.get(), shapeVs_.get(), shapePs_.get());
-    draw(flakeBuf_, sizeof(FlakeInstance), flakes_.size(), flakeLayout_.get(), flakeVs_.get(), flakePs_.get());
+    draw(pileBuf_, sizeof(render::PileInstance), frame_.piles.size(), pileLayout_.get(), pileVs_.get(), pilePs_.get());
+    draw(ballBuf_, sizeof(render::BallInstance), frame_.balls.size(), ballLayout_.get(), ballVs_.get(), ballPs_.get());
+    draw(shapeBuf_, sizeof(render::ShapeInstance), frame_.shapes.size(), shapeLayout_.get(), shapeVs_.get(), shapePs_.get());
+    draw(flakeBuf_, sizeof(render::FlakeInstance), frame_.flakes.size(), flakeLayout_.get(), flakeVs_.get(), flakePs_.get());
 
     hr = gpu_.present();
     if (SUCCEEDED(hr)) return Result::Ok;

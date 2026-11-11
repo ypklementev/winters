@@ -4,6 +4,7 @@
 Снег можно смахнуть курсором или слепить из него снежки и снеговика. Клики проходят сквозь снег, поэтому работать он не мешает.
 
 Нативное приложение на C++20 + Win32 + Direct3D 11 + DirectComposition: один exe без зависимостей и без установщика.
+Есть версия для macOS (прототип): та же симуляция, оболочка на AppKit + Metal, см. [macOS](#macos).
 
 [Установить из Microsoft Store](https://apps.microsoft.com/detail/9PNZ9T3SS34X) (`ms-windows-store://pdp/?ProductId=9PNZ9T3SS34X`) или скачать portable-exe из релизов.
 
@@ -143,6 +144,47 @@ WACK устанавливает пакет, поэтому ему нужна п�
 5. В «Сведениях» о `runFullTrust` объяснить: приложение рисует прозрачный оверлей поверх рабочего стола и следит за положением окон, это настольное Win32-приложение.
    Политика конфиденциальности: `PRIVACY.md` в репозитории.
 
+## macOS
+
+Прототип. Симуляция (`src/sim`) и подготовка данных для GPU (`src/render/instances.*`, атлас, фигуры) общие с Windows.
+Своя у мака только оболочка в `src/mac/` на Objective-C++: AppKit, Metal, CGWindowList.
+
+Требования: macOS 13+, Apple Silicon или Intel. Для сборки нужны только Command Line Tools (`xcode-select --install`) и CMake (`brew install cmake`). Xcode не нужен.
+
+```sh
+./build.sh                    # universal (arm64 + x86_64): dist/WinTers_<версия>_macOS.dmg и .zip
+./build.sh --arch native      # только под этот Mac, быстрее
+```
+
+Для разработки:
+
+```sh
+cmake -S . -B build/macos && cmake --build build/macos --parallel
+open build/macos/WinTers.app              # выход: снежинка в строке меню → «Выйти»
+build/macos/winters_preview out.png 60    # кадр через Metal-рендерер в PNG, без оверлея
+```
+
+**Подпись.** Без переменных окружения приложение подписывается ad-hoc. На этом Mac оно запускается, но на других Gatekeeper его блокирует: нужно открыть «Системные настройки → Конфиденциальность и безопасность → Всё равно открыть».
+Чтобы открывалось везде без предупреждений, нужен Apple Developer Program ($99 в год):
+
+```sh
+xcrun notarytool store-credentials winters --apple-id <apple id> --team-id <TEAMID>   # один раз
+WINTERS_SIGN_IDENTITY="Developer ID Application: <Имя> (<TEAMID>)" WINTERS_NOTARY_PROFILE=winters ./build.sh
+```
+
+Bundle ID задаётся в CMake (`WINTERS_MAC_BUNDLE_ID`, по умолчанию `ru.ypklementev.WinTers`), настройки хранятся в `~/Library/Preferences/<bundle id>.plist`.
+
+Чем отличается от Windows:
+- **Окна** берутся опросом `CGWindowListCopyWindowInfo`: событий о перемещении окон в macOS нет. Опрос идёт каждый кадр, пока зажата кнопка мыши (окно могут тащить), и каждый третий кадр в остальное время. Один опрос занимает около 0,2 мс. Разрешения не нужны: читаются только рамки окон, не заголовки.
+- **Оверлей** — по одному окну `NSPanel` на каждый экран (одно окно не может накрыть несколько дисплеев, когда у них отдельные Spaces). Уровень `NSStatusWindowLevel`: над Dock и строкой меню, под меню. Окно есть на всех Spaces, в том числе поверх полноэкранных приложений.
+- **Координаты.** Симуляция считает в единицах «1/scale пункта», где scale — наибольший Retina-коэффициент среди экранов. На Retina это физические пиксели, как на Windows. На обычном мониторе рядом с Retina шейдеры масштабируют ширину сглаживания (`aa`).
+- **Dock** считается панелью задач на всю ширину экрана: снег ложится на линию его верхнего края. Точную ширину Dock можно узнать только с разрешением Accessibility.
+  Строка меню прячет верхние кромки прижатых к ней окон, как верх экрана прячет кромки развёрнутых окон на Windows.
+- **Лепка:** Control + Option (любой Option: AltGr на маке нет). Пауза: Control + Option + S (Carbon `RegisterEventHotKey`).
+- **Автозапуск** через `SMAppService` («Открывать при входе в систему»). Если его выключили в «Системных настройках → Основные → Объекты входа», пункт меню ведёт туда.
+- **Автопауза:** режим энергосбережения (Low Power Mode), сон, погашенный экран, блокировка, переключение пользователя.
+- **Шейдеры** — порт HLSL на Metal Shading Language (`src/mac/metal_shaders.h`). Они компилируются при запуске через `newLibraryWithSource`, поэтому компилятор `metal` из Xcode не нужен. **Правка шейдера на одной платформе требует такой же правки на другой.**
+
 ## Сборка без Windows (macOS / Linux)
 
 ### Тесты симуляции, нативно
@@ -181,8 +223,9 @@ for e in vs_disc:vert vs_pile:vert ps_flake:frag ps_ball:frag ps_pile:frag; do
 
 `.github/workflows/build.yml` на каждый push:
 - запускает `build.ps1 -Target all -TestSign` на MSVC и выкладывает артефакты **WinTers-x64** (portable exe) и **WinTers-msix** (неподписанный и тестовый пакеты, сертификат);
+- запускает `build.sh` на macOS и выкладывает артефакт **WinTers-macOS** (universal, ad-hoc подпись: .dmg и .zip);
 - пробует установить тестовый пакет (`Add-AppxPackage`). Это проверка, что манифест и подпись корректны; на раннере она может не сработать и только предупреждает;
-- гоняет тесты симуляции на MSVC и на Linux с ASan/UBSan.
+- гоняет тесты симуляции на MSVC, macOS и на Linux с ASan/UBSan.
 
 ## Запуск
 
@@ -199,13 +242,18 @@ src/
                     варежка, снежки. Без WinAPI, покрыт тестами (tests/).
   app/              wWinMain, цикл, трей и меню, settings.ini, автозапуск (Run / StartupTask), режим MSIX, автопауза, манифест, иконка
   overlay/          прозрачное click-through окно на весь виртуальный экран; список мониторов
-  render/           D3D11 + DirectComposition; 3 инстансных draw call: сугробы, снежки, снежинки;
-                    flake_atlas — процедурный атлас спрайтов (чистый C++, тоже под тестами)
+  render/           D3D11 + DirectComposition; 4 инстансных draw call: сугробы, снежки, фигуры, снежинки;
+                    общие с macOS (чистый C++, под тестами): instances — данные инстансов из World,
+                    flake_atlas — процедурный атлас спрайтов, shapes — дворник и украшения снеговика
   windows_tracker/  окна верхнего уровня: EnumWindows + DWM-границы + SetWinEventHook
   input/            курсор и клавиши опросом каждый кадр (без хуков), Ctrl+Alt+S
-packaging/          шаблон AppxManifest.xml и логотипы MSIX
-tools/make_icon.py  генератор src/app/snowflake.ico; make_store_assets.py — логотипы MSIX
-build.ps1           сборка portable exe и MSIX в dist/
+  mac/              macOS: контроллер и меню в строке меню, оверлеи NSPanel, Metal-рендерер и MSL-шейдеры,
+                    экраны и координаты, CGWindowList, ввод и Control+Option+S, NSUserDefaults и SMAppService
+packaging/          шаблон AppxManifest.xml и логотипы MSIX; macos/ — Info.plist и WinTers.icns
+tools/make_icon.py  генератор src/app/snowflake.ico; make_store_assets.py — логотипы MSIX; make_icns.py — иконка macOS
+tools/mac_preview.mm  кадр симуляции через Metal-рендерер в PNG (проверка шейдеров без оверлея)
+build.ps1           сборка portable exe и MSIX в dist/ (Windows)
+build.sh            сборка WinTers.app, .dmg и .zip в dist/ (macOS)
 ```
 
 - **Оверлей.** Окно `WS_EX_NOREDIRECTIONBITMAP | TRANSPARENT | LAYERED | TOPMOST | TOOLWINDOW | NOACTIVATE`.
