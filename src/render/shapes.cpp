@@ -22,7 +22,7 @@ std::vector<Shape> Build(const sim::World& world) {
     for (const sim::Snowman& m : world.snowmen()) {
         const sim::Snowball& head = world.snowballs()[m.head];
         const sim::Snowball& mid = world.snowballs()[m.middle];
-        const float age = world.time() - head.decoratedAt;
+        const float age = static_cast<float>(world.time() - head.decoratedAt);
         float k = std::clamp(age / 0.5f, 0.0f, 1.0f);
         k = k * k * (3.0f - 2.0f * k);
         if (k <= 0.0f) continue;

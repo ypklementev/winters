@@ -59,7 +59,8 @@ constexpr float kBallStartRadius = 4.0f;
 constexpr float kBallMaxRadius = 90.0f;
 constexpr float kBallGrow = 1.5f;  // area gained per area of snow rolled up
 constexpr float kBallBite = 0.3f;  // snow depth picked up per px rolled
-constexpr std::size_t kMaxBalls = 40;
+constexpr std::size_t kMaxBalls = 60;
+constexpr std::size_t kMaxBallsUnlimited = 250;
 constexpr float kBallMaxThrow = 2500.0f;
 constexpr float kShatterSpeed = 900.0f;   // impact speed that breaks a ball (~220 px drop)
 constexpr float kStickDelay = 0.15f;      // s a ball must rest on another before sticking
@@ -148,7 +149,7 @@ void World::setWindows(const std::vector<WindowInfo>& windows) {
         const bool widthChanged = std::abs(s.rect.width() - w.rect.width()) > 0.5f;
         if (topChanged || (leftChanged && !widthChanged)) {
             // Moved: the snow falls off where it was, flung along if yanked.
-            const float since = std::max(time_ - s.lastSeen, kFixedDt);
+            const float since = std::max(static_cast<float>(time_ - s.lastSeen), kFixedDt);
             Vec2 vel{(w.rect.left - s.rect.left) / since, (w.rect.top - s.rect.top) / since};
             const float sp = length(vel);
             const float maxSp = kMaxInheritSpeed * s.scale;
@@ -264,9 +265,9 @@ float World::scaleAt(Vec2 p) const {
 float World::computeWind() const {
     if (cfg_.wind == 0.0f) return 0.0f;
     const float g = cfg_.gustiness;
-    const float t = time_;
-    const float gust = 0.55f * std::sin(0.31f * t) + 0.3f * std::sin(0.97f * t + 1.3f) +
-                       0.15f * std::sin(2.3f * t + 0.4f);
+    const double t = time_;
+    const float gust = static_cast<float>(0.55 * std::sin(0.31 * t) + 0.3 * std::sin(0.97 * t + 1.3) +
+                                          0.15 * std::sin(2.3 * t + 0.4));
     return cfg_.wind * std::max(0.1f, 1.0f + g * gust);
 }
 
@@ -275,6 +276,13 @@ float World::lyingArea() const {
     float a = 0.0f;
     for (const Surface& s : surfaces_) a += s.pile.totalArea();
     return a;
+}
+
+float World::pileCap(const Surface& s) const {
+    const float normal = kMaxPile * s.scale;
+    if (!cfg_.unlimited) return normal;
+    // Up to the top of the screens, leaving a little headroom.
+    return std::max(normal, s.edgeY() - bounds_.top - kMinHeadroom * s.scale);
 }
 
 bool World::holdingSnowball() const {
@@ -471,7 +479,7 @@ void World::landFlakes() {
                 // Cheap reject: the snow line lies within [edge - maxPile, edge].
                 const Surface& cand = surfaces_[si];
                 const float edge = cand.rect.top;
-                if (y0 > edge || y1 < edge - kMaxPile * cand.scale) continue;
+                if (y0 > edge || y1 < edge - pileCap(cand)) continue;
                 const float line = cand.lineAt(x);
                 if (line != kNoSurface && y0 <= line && y1 >= line && line < bestLine) {
                     bestLine = line;
@@ -489,7 +497,7 @@ void World::landFlakes() {
             continue;
         }
         Surface& s = surfaces_[static_cast<std::size_t>(best)];
-        s.pile.deposit(x - s.rect.left, std::max(r, s.pile.cellWidth()), flakes_.mass[i], kMaxPile * s.scale);
+        s.pile.deposit(x - s.rect.left, std::max(r, s.pile.cellWidth()), flakes_.mass[i], pileCap(s));
         s.settled = false;
         flakes_.remove(i);
     }
@@ -605,16 +613,22 @@ void World::applyMitten() {
         if (ball.held) continue;
         if (plowMode) {
             // Solid pusher (only while moving, so a ball just let go of isn't
-            // shoved away by the resting cursor). Stacks are pushed by their base.
-            if (ball.parent != 0 || speed < kMittenMinSpeed * scale) continue;
+            // shoved away by the resting cursor). Touching any ball of a glued
+            // cluster pushes the whole cluster through its root.
+            if (speed < kMittenMinSpeed * scale) continue;
             const Vec2 off = ball.pos - b;
             const float dist = length(off);
             const float minD = R + ball.radius;
             if (dist >= minD || dist < 1e-3f) continue;
             const Vec2 n = off * (1.0f / dist);
-            ball.pos = b + n * minD;
-            const float vn = dot(pointer_.vel - ball.vel, n);
-            if (vn > 0.0f) ball.vel = ball.vel + n * vn;
+            Snowball& root = balls_[static_cast<std::size_t>(rootOf(static_cast<std::size_t>(&ball - balls_.data())))];
+            if (root.held) continue;
+            root.pos = root.pos + (b + n * minD - ball.pos);
+            if (&root != &ball) ball.pos = b + n * minD;
+            const float vn = dot(pointer_.vel - root.vel, n);
+            if (vn > 0.0f) root.vel = root.vel + n * vn;
+            root.pushedAt = time_;
+            root.stillTime = 0.0f;
         } else {
             // Only a real swipe through a ball knocks it (and off a stack).
             if (speed < kKickSpeed * scale || distToSeg(ball.pos) > R + ball.radius) continue;
@@ -664,7 +678,7 @@ void World::applyMitten() {
         for (int k = 0; k < samples; ++k) {
             const float t = samples == 1 ? 1.0f : static_cast<float>(k) / static_cast<float>(samples - 1);
             const Vec2 c = a + seg * t;
-            if (c.y - R > s.edgeY() || c.y + R < s.edgeY() - kMaxPile * s.scale) continue;
+            if (c.y - R > s.edgeY() || c.y + R < s.edgeY() - pileCap(s)) continue;
             const int i0 = std::max(0, static_cast<int>((c.x - R - s.rect.left) / cw));
             const int i1 = std::min(static_cast<int>(s.pile.size()) - 1,
                                     static_cast<int>((c.x + R - s.rect.left) / cw));
@@ -707,6 +721,9 @@ void World::plowIntoBall(float mass, Vec2 cursor, float scale) {
     float best = 1e30f;
     for (Snowball& ball : balls_) {
         if (ball.held || time_ - ball.pushedAt > kPushMemory) continue;
+        // A ball at its size limit can't take more: the snow starts a new one
+        // (it used to vanish into the full ball, so plowing seemed to stop).
+        if (ball.radius >= kBallMaxRadius * ball.scale * 0.98f) continue;
         const float d = length(ball.pos - cursor) - ball.radius;
         if (d < R * 2.0f && d < best) {
             best = d;
@@ -809,7 +826,7 @@ void World::updateGrab() {
                     b.pos = b.prevPos = p;
                     b.held = true;
                     const std::uint32_t id = addBall(b).id;
-                    heldIt = balls_.begin() + findBall(balls_, id);
+                    heldIt = balls_.begin() + ballIndex(id);
                 }
                 break;
             }
@@ -914,7 +931,7 @@ void World::stepWiper(float dt) {
     auto angleOf = [&](float x, float y) { return std::atan2(pv.y - y, x - pv.x); };
     index_.forRange(pv.x - L - w, pv.x + L + w, [&](std::uint32_t si) {
         Surface& sf = surfaces_[si];
-        if (sf.edgeY() < pv.y - L - w || sf.edgeY() - kMaxPile * sf.scale > pv.y + w) return;
+        if (sf.edgeY() < pv.y - L - w || sf.edgeY() - pileCap(sf) > pv.y + w) return;
         const float cw = sf.pile.cellWidth();
         const int i0 = std::max(0, static_cast<int>((pv.x - L - w - sf.rect.left) / cw));
         const int i1 = std::min(static_cast<int>(sf.pile.size()) - 1, static_cast<int>((pv.x + L + w - sf.rect.left) / cw));
@@ -970,7 +987,7 @@ void World::growHeld(Snowball& b, float movedX) {
     index_.forRange(b.pos.x - r, b.pos.x + r, [&](std::uint32_t si) {
         Surface& s = surfaces_[si];
         const float edge = s.edgeY();
-        if (edge < b.pos.y - r || edge - kMaxPile * s.scale > b.pos.y + r + 4.0f * s.scale) return;
+        if (edge < b.pos.y - r || edge - pileCap(s) > b.pos.y + r + 4.0f * s.scale) return;
         const float cw = s.pile.cellWidth();
         const int i0 = std::max(0, static_cast<int>((b.pos.x - r - s.rect.left) / cw));
         const int i1 = std::min(static_cast<int>(s.pile.size()) - 1, static_cast<int>((b.pos.x + r - s.rect.left) / cw));
@@ -1026,7 +1043,7 @@ void World::collideBallWithSurfaces(Snowball& b, float dt, float heldPointerY) {
 }
 
 Snowball& World::addBall(Snowball b) {
-    if (balls_.size() >= kMaxBalls) {
+    if (balls_.size() >= (cfg_.unlimited ? kMaxBallsUnlimited : kMaxBalls)) {
         // Drop the oldest ball that isn't part of something (or just the oldest).
         std::size_t victim = 0;
         for (std::size_t k = 0; k < balls_.size(); ++k) {
@@ -1056,24 +1073,54 @@ bool World::isAncestor(std::uint32_t maybeAncestor, const Snowball& b) const {
     std::uint32_t p = b.parent;
     for (int guard = 0; p != 0 && guard < 64; ++guard) {
         if (p == maybeAncestor) return true;
-        const int k = findBall(balls_, p);
+        const int k = ballIndex(p);
         if (k < 0) break;
         p = balls_[static_cast<std::size_t>(k)].parent;
     }
     return false;
 }
 
+int World::ballIndex(std::uint32_t id) const {
+    // balls_ stays sorted by id (ids only grow, erase keeps order).
+    const auto it = std::lower_bound(balls_.begin(), balls_.end(), id,
+                                     [](const Snowball& b, std::uint32_t v) { return b.id < v; });
+    return it != balls_.end() && it->id == id ? static_cast<int>(it - balls_.begin()) : -1;
+}
+
 void World::followParents() {
-    // Parents before children: a few passes cover any realistic stack height.
-    for (int pass = 0; pass < 4; ++pass) {
-        for (Snowball& b : balls_) {
-            if (b.parent == 0 || b.held) continue;
-            const int k = findBall(balls_, b.parent);
-            if (k < 0) {
-                b.parent = 0;  // parent is gone: fall free
-                continue;
-            }
-            const Snowball& p = balls_[static_cast<std::size_t>(k)];
+    // Glued clusters can be any shape and depth: place parents before their
+    // children by walking the tree in depth order.
+    const std::size_t n = balls_.size();
+    std::vector<int> depth(n, -1);
+    std::vector<int> parentIdx(n, -1);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (balls_[i].parent == 0) continue;
+        parentIdx[i] = ballIndex(balls_[i].parent);
+        if (parentIdx[i] < 0) balls_[i].parent = 0;  // parent is gone: fall free
+    }
+    int maxDepth = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        // Walk up to the first ball with a known depth (guarded against cycles).
+        int d = 0;
+        int k = static_cast<int>(i);
+        while (k >= 0 && depth[static_cast<std::size_t>(k)] < 0 && d <= static_cast<int>(n)) {
+            k = parentIdx[static_cast<std::size_t>(k)];
+            ++d;
+        }
+        const int base = k >= 0 ? depth[static_cast<std::size_t>(k)] + 1 : 0;
+        // Fill the chain we just walked.
+        int j = static_cast<int>(i);
+        for (int step = d; step > 0 && j >= 0; --step) {
+            depth[static_cast<std::size_t>(j)] = base + step - 1;
+            j = parentIdx[static_cast<std::size_t>(j)];
+        }
+        maxDepth = std::max(maxDepth, depth[i]);
+    }
+    for (int level = 1; level <= maxDepth; ++level) {
+        for (std::size_t i = 0; i < n; ++i) {
+            Snowball& b = balls_[i];
+            if (depth[i] != level || b.parent == 0 || b.held) continue;
+            const Snowball& p = balls_[static_cast<std::size_t>(parentIdx[i])];
             b.prevPos = b.pos;
             b.pos = p.pos + b.offset;
             b.vel = p.vel;
@@ -1081,11 +1128,23 @@ void World::followParents() {
     }
 }
 
+int World::rootOf(std::size_t i) const {
+    int k = static_cast<int>(i);
+    for (std::size_t guard = 0; guard <= balls_.size(); ++guard) {
+        const Snowball& b = balls_[static_cast<std::size_t>(k)];
+        if (b.parent == 0 || b.held) return k;
+        const int p = ballIndex(b.parent);
+        if (p < 0) return k;
+        k = p;
+    }
+    return k;
+}
+
 void World::stickResting(float dt) {
     // Stuck balls slowly settle into the one below, as packed snow does.
     for (Snowball& a : balls_) {
         if (a.parent == 0 || a.held) continue;
-        const int k = findBall(balls_, a.parent);
+        const int k = ballIndex(a.parent);
         if (k < 0) continue;
         const Snowball& b = balls_[static_cast<std::size_t>(k)];
         const float target = a.radius + b.radius - kMergeDepth * std::min(a.radius, b.radius);
@@ -1096,15 +1155,22 @@ void World::stickResting(float dt) {
     }
     for (Snowball& a : balls_) {
         if (a.held || a.parent != 0) continue;
+        // Any resting ball touching it from above or from the side: snow
+        // packs together, so clusters of any size and shape hold. The ball
+        // most directly underneath wins.
         std::uint32_t on = 0;
+        float bestBelow = -1e30f;
         for (const Snowball& b : balls_) {
             if (&a == &b || b.held || isAncestor(a.id, b)) continue;
             const float dist = length(a.pos - b.pos);
-            if (dist > a.radius + b.radius + 1.5f * a.scale) continue;
-            if (a.pos.y >= b.pos.y || std::abs(a.pos.x - b.pos.x) > b.radius * 0.6f) continue;
+            if (dist > a.radius + b.radius + 1.5f * a.scale || dist < 1e-3f) continue;
+            const float below = (b.pos.y - a.pos.y) / dist;  // 1 = straight under, 0 = beside
+            if (below < -0.3f) continue;                     // don't hang from a ball above
             if (length(a.vel - b.vel) > kStickSpeed * a.scale) continue;
-            on = b.id;
-            break;
+            if (below > bestBelow) {
+                bestBelow = below;
+                on = b.id;
+            }
         }
         if (on == 0) {
             a.settleOn = 0;
@@ -1117,7 +1183,7 @@ void World::stickResting(float dt) {
         }
         a.settleTime += dt;
         if (a.settleTime < kStickDelay) continue;
-        const Snowball& b = balls_[static_cast<std::size_t>(findBall(balls_, on))];
+        const Snowball& b = balls_[static_cast<std::size_t>(ballIndex(on))];
         const Vec2 d = a.pos - b.pos;
         const float len = std::max(length(d), 1e-3f);
         a.parent = on;
@@ -1217,8 +1283,8 @@ void World::stepBalls(float dt) {
     for (Snowball& b : balls_) {
         const bool head = std::any_of(snowmen_.begin(), snowmen_.end(),
                                       [&](const Snowman& m) { return &balls_[m.head] == &b; });
-        if (!head) b.decoratedAt = -1.0f;
-        else if (b.decoratedAt < 0.0f) b.decoratedAt = time_;
+        if (!head) b.decoratedAt = -1.0;
+        else if (b.decoratedAt < 0.0) b.decoratedAt = time_;
     }
 }
 

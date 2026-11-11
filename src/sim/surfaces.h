@@ -46,7 +46,7 @@ struct Surface {
     Heightmap pile;
     float spillCarry = 0.0f;    // spilled area not yet turned into particles
     float erosionCarry = 0.0f;  // wind-blown area not yet turned into particles
-    float lastSeen = 0.0f;      // world time of the last setWindows() that saw it
+    double lastSeen = 0.0;     // world time of the last setWindows() that saw it
     bool settled = true;        // no relaxation needed until something changes
 
     float edgeY() const { return rect.top; }

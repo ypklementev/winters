@@ -15,7 +15,7 @@ public:
     void configure(const RectF& bounds, float cell = 64.0f);
 
     // baseWind: horizontal wind, px/s. turbulence: eddy speed scale, px/s.
-    void update(float time, float baseWind, float turbulence);
+    void update(double time, float baseWind, float turbulence);
 
     // Air velocity at (x, y), px/s (at DPI scale 1). Zero if not configured.
     Vec2 sample(float x, float y) const;

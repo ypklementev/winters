@@ -29,6 +29,9 @@ struct SnowConfig {
     // Snow (px^2, logical) a typical 1 px flake leaves when it lands; sets how
     // fast piles grow independently of how many particles are drawn.
     float flakeMass = 0.4f;
+    // No cap on how deep snow piles up (up to the top of the screen), more
+    // snowballs and a larger flake pool.
+    bool unlimited = false;
 };
 
 struct PointerInput {
@@ -71,7 +74,7 @@ public:
     const std::vector<Snowball>& snowballs() const { return balls_; }
     // Complete snowmen (indices into snowballs()), refreshed every step.
     const std::vector<Snowman>& snowmen() const { return snowmen_; }
-    float time() const { return time_; }
+    double time() const { return time_; }
     float currentWind() const { return windNow_; }
     bool holdingSnowball() const;
     // A snowball or the wiper is being dragged.
@@ -129,6 +132,9 @@ private:
     void stickResting(float dt);     // balls resting on top of another stick to it
     void shatter(std::size_t i);
     bool isAncestor(std::uint32_t maybeAncestor, const Snowball& b) const;
+    int ballIndex(std::uint32_t id) const;  // fast findBall (balls_ is sorted by id)
+    int rootOf(std::size_t i) const;
+    float pileCap(const Surface& s) const;  // max pile height on this surface        // the free ball a glued cluster hangs from
     // heldPointerY: for a dragged ball, the cursor y. Surfaces the cursor has
     // been pulled well below are passed through (lets you lift a ball off a ledge).
     void collideBallWithSurfaces(Snowball& b, float dt, float heldPointerY = kNoSurface);
@@ -138,7 +144,7 @@ private:
     RectF bounds_;
     FlakePool flakes_;
     Rng rng_;
-    float time_ = 0.0f;
+    double time_ = 0.0;  // double: a float clock stalls after a few days of uptime
     float windNow_ = 0.0f;
     WindField air_;
     std::vector<float> floors_;  // lowest screen bottom per column bucket
@@ -154,7 +160,7 @@ private:
     bool wasPressed_ = false;
     float mittenCarry_ = 0.0f;
     float plowCarry_ = 0.0f;  // snow pushed by the cursor, not yet a ball
-    float lastPlowTime_ = -1.0f;
+    double lastPlowTime_ = -1.0;
 
     Wiper wiper_;
     bool wiperHeld_ = false;

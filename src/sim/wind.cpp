@@ -38,7 +38,7 @@ void WindField::configure(const RectF& bounds, float cell) {
     nodes_.assign(static_cast<std::size_t>(nx_) * static_cast<std::size_t>(ny_), Vec2{});
 }
 
-void WindField::update(float time, float baseWind, float turbulence) {
+void WindField::update(double time, float baseWind, float turbulence) {
     base_ = baseWind;
     if (nodes_.empty()) return;
     // Each mode is separable: sin/cos of the x-phase depend only on the column
@@ -48,11 +48,12 @@ void WindField::update(float time, float baseWind, float turbulence) {
     colCos_.resize(colSin_.size());
     rowSin_.resize(static_cast<std::size_t>(ny_) * kM);
     rowCos_.resize(rowSin_.size());
-    const float drift = baseWind * time * 0.8f;  // eddies are carried by the wind
+    // Phases in double: `time` keeps growing for as long as the app runs.
+    const double drift = static_cast<double>(baseWind) * time * 0.8;  // eddies are carried by the wind
     for (int i = 0; i < nx_; ++i) {
-        const float x = originX_ + static_cast<float>(i) * cell_ - drift;
+        const double x = static_cast<double>(originX_ + static_cast<float>(i) * cell_) - drift;
         for (int m = 0; m < kM; ++m) {
-            const float a = kModes[m].kx * x + kModes[m].wx * time + kModes[m].px;
+            const float a = static_cast<float>(std::fmod(kModes[m].kx * x + kModes[m].wx * time + kModes[m].px, 2.0 * kPi));
             colSin_[static_cast<std::size_t>(i * kM + m)] = std::sin(a);
             colCos_[static_cast<std::size_t>(i * kM + m)] = std::cos(a);
         }
@@ -60,7 +61,7 @@ void WindField::update(float time, float baseWind, float turbulence) {
     for (int j = 0; j < ny_; ++j) {
         const float y = originY_ + static_cast<float>(j) * cell_;
         for (int m = 0; m < kM; ++m) {
-            const float a = kModes[m].ky * y + kModes[m].wy * time + kModes[m].py;
+            const float a = static_cast<float>(std::fmod(kModes[m].ky * y + kModes[m].wy * time + kModes[m].py, 2.0 * kPi));
             rowSin_[static_cast<std::size_t>(j * kM + m)] = std::sin(a);
             rowCos_[static_cast<std::size_t>(j * kM + m)] = std::cos(a);
         }

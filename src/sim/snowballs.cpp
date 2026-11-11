@@ -78,31 +78,45 @@ void resolveBallContacts(std::vector<Snowball>& balls, int iterations) {
 
 std::vector<Snowman> findSnowmen(const std::vector<Snowball>& balls) {
     std::vector<Snowman> out;
-    auto childOf = [&](std::size_t p) {
+    // "On top": stuck to it and sitting roughly above its centre. Balls glued
+    // to the side don't spoil a snowman (it can stand in a bigger sculpture).
+    auto onTop = [&](std::size_t upper, std::size_t lower) {
+        const Snowball& u = balls[upper];
+        const Snowball& l = balls[lower];
+        return u.parent != 0 && u.parent == l.id && u.pos.y < l.pos.y && std::abs(u.pos.x - l.pos.x) <= l.radius * 0.6f;
+    };
+    auto childOnTop = [&](std::size_t p) {
         int found = -1;
         int count = 0;
         for (std::size_t i = 0; i < balls.size(); ++i) {
-            if (balls[i].parent == balls[p].id) {
+            if (i != p && onTop(i, p)) {
                 found = static_cast<int>(i);
                 ++count;
             }
         }
         return count == 1 ? found : -1;  // a single neat stack only
     };
+    auto hasChildOnTop = [&](std::size_t p) {
+        for (std::size_t i = 0; i < balls.size(); ++i) {
+            if (i != p && onTop(i, p)) return true;
+        }
+        return false;
+    };
     for (std::size_t base = 0; base < balls.size(); ++base) {
-        if (balls[base].parent != 0) continue;
-        const int mid = childOf(base);
+        // The base must stand on its own (not be the top of a taller tower).
+        if (balls[base].parent != 0) {
+            const int under = findBall(balls, balls[base].parent);
+            if (under >= 0 && onTop(base, static_cast<std::size_t>(under))) continue;
+        }
+        const int mid = childOnTop(base);
         if (mid < 0) continue;
-        const int head = childOf(static_cast<std::size_t>(mid));
+        const int head = childOnTop(static_cast<std::size_t>(mid));
         if (head < 0) continue;
-        if (childOf(static_cast<std::size_t>(head)) >= 0) continue;  // a fourth ball on top
+        if (hasChildOnTop(static_cast<std::size_t>(head))) continue;  // a fourth ball on top
         const Snowball& b = balls[base];
         const Snowball& m = balls[static_cast<std::size_t>(mid)];
         const Snowball& h = balls[static_cast<std::size_t>(head)];
         if (m.radius > b.radius * kSmallerBy || h.radius > m.radius * kSmallerBy) continue;
-        // Upright: each ball sits roughly above the one below.
-        if (m.pos.y >= b.pos.y || h.pos.y >= m.pos.y) continue;
-        if (std::abs(m.pos.x - b.pos.x) > b.radius * 0.6f || std::abs(h.pos.x - m.pos.x) > m.radius * 0.6f) continue;
         out.push_back({base, static_cast<std::size_t>(mid), static_cast<std::size_t>(head)});
     }
     return out;

@@ -24,11 +24,11 @@ struct Snowball {
     bool held = false;         // being dragged by the cursor
     bool contact = false;      // touched ground or another ball this step
     float stillTime = 0.0f;
-    float pushedAt = -1.0f;    // world time the cursor last pushed it
+    double pushedAt = -1.0;    // world time the cursor last pushed it
     float impactSpeed = 0.0f;  // hardest hit this step (px/s), for shattering
     float settleTime = 0.0f;   // how long it has rested on a candidate parent
     std::uint32_t settleOn = 0;
-    float decoratedAt = -1.0f; // world time it became a snowman's head (-1 = not)
+    double decoratedAt = -1.0; // world time it became a snowman's head (-1 = not)
 
     // Moved by someone else this step (cursor or parent): infinite mass.
     bool kinematic() const { return held || parent != 0; }
@@ -42,8 +42,9 @@ void resolveBallContacts(std::vector<Snowball>& balls, int iterations);
 // Index of the ball with this id, or -1.
 int findBall(const std::vector<Snowball>& balls, std::uint32_t id);
 
-// A complete snowman: three stuck balls, each clearly smaller than the one
-// below, with nothing on top of the head.
+// A complete snowman: three balls stuck on top of each other, each clearly
+// smaller than the one below, with nothing on top of the head. Other balls
+// may be glued to its sides.
 struct Snowman {
     std::size_t base, middle, head;
 };

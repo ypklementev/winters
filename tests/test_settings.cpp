@@ -38,3 +38,13 @@ TEST(settings_sanitize_clamps_garbage_from_ini) {
     CHECK(c.windStrength == 3);
     CHECK(toSnowConfig(s).wind == 0.0f);
 }
+
+TEST(settings_unlimited_mode_maps_to_config) {
+    UserSettings s;
+    const SnowConfig normal = toSnowConfig(s);
+    s.unlimited = true;
+    const SnowConfig c = toSnowConfig(s);
+    CHECK(c.unlimited);
+    CHECK(!normal.unlimited);
+    CHECK(c.maxFlakes > normal.maxFlakes);
+}

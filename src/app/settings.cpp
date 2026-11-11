@@ -50,6 +50,7 @@ sim::UserSettings LoadSettings() {
     s.wiperPlaced = ReadInt(path, L"WiperPlaced", 0) != 0;
     s.wiperX = ReadInt(path, L"WiperX", 0);
     s.wiperY = ReadInt(path, L"WiperY", 0);
+    s.unlimited = ReadInt(path, L"Unlimited", 0) != 0;
     return sim::sanitize(s);
 }
 
@@ -63,4 +64,5 @@ void SaveSettings(const sim::UserSettings& s) {
     WriteInt(path, L"WiperPlaced", s.wiperPlaced ? 1 : 0);
     WriteInt(path, L"WiperX", s.wiperX);
     WriteInt(path, L"WiperY", s.wiperY);
+    WriteInt(path, L"Unlimited", s.unlimited ? 1 : 0);
 }

@@ -48,6 +48,7 @@ enum MenuId : UINT {
     kMenuWindStrong,
     kMenuShovel = 140,
     kMenuWiper = 145,
+    kMenuUnlimited = 146,
     kMenuAutostart = 151,
     kMenuHelp = 160,
     kMenuExit = 199,
@@ -299,10 +300,11 @@ void App::showHelp() {
                 L"• Снежный ком — зажмите Ctrl + левый Alt и ведите курсор вдоль сугроба: снег сгребается "
                 L"в шарик, который катится перед курсором и растёт. Можно и нажать на сугроб с Ctrl + Alt "
                 L"и катить снежок мышкой.\n\n"
-                L"• Снеговик — наведите курсор на шарик (появится рука), возьмите и поставьте на другой: "
-                L"шары слипаются. Три шара от большого к маленькому — и снеговик получит ведро, морковку и глаза. "
+                L"• Снеговик — наведите курсор на шарик (появится рука), возьмите и поставьте на другой или вплотную рядом: "
+                L"шары слипаются, лепить можно сколько угодно шаров. Три шара от большого к маленькому — и снеговик получит ведро, морковку и глаза. "
                 L"За нижний шар можно унести весь снеговик.\n\n"
                 L"• Шар, брошенный или упавший с высоты, разбивается.\n\n"
+                L"• «Снегопад → Без ограничений» — сугробы растут хоть до верха экрана.\n\n"
                 L"• Дворник (в меню) смахивает снег. Его ось можно перетащить мышкой.\n\n"
                 L"• Ctrl + Alt + S — пауза / продолжить.\n\n"
                 L"• «Лопата» в меню убирает весь снег.",
@@ -329,6 +331,9 @@ void App::showTrayMenu(POINT at) {
     AppendMenuW(snow, MF_STRING, kMenuBlizzard, L"Метель");
     CheckMenuRadioItem(snow, kMenuLight, kMenuBlizzard, kMenuLight + static_cast<UINT>(settings_.intensity),
                        MF_BYCOMMAND);
+    AppendMenuW(snow, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(snow, MF_STRING | (settings_.unlimited ? MF_CHECKED : 0u), kMenuUnlimited,
+                L"Без ограничений (сугробы до верха экрана)");
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(snow), L"Снегопад");
 
     AppendMenuW(wind, MF_STRING, kMenuWindCalm, L"Штиль");
@@ -386,6 +391,9 @@ void App::showTrayMenu(POINT at) {
             world_.clear();
             framePending_ = true;
             settingsChanged = false;
+            break;
+        case kMenuUnlimited:
+            settings_.unlimited = !settings_.unlimited;
             break;
         case kMenuWiper:
             settings_.wiper = !settings_.wiper;

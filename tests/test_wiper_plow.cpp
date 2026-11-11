@@ -332,3 +332,100 @@ TEST(snowman_built_by_hand_gets_decorated) {
     CHECK(w.snowmen().empty());
     movePointer(w, {200, 200}, {200, 200}, 0.05f, true);
 }
+
+// --- regressions: full balls, any number glued, unlimited piles -------------------
+
+TEST(plowing_next_to_a_full_size_ball_still_makes_balls) {
+    World w = snowyWindow(11);
+    // One long push: a ball that hits the size limit.
+    float line = lineAt(w, 1, 150.0f);
+    movePointer(w, {150, line + 4}, {1350, line + 4}, 3.0f, false, true);
+    idlePointer(w, {10, 10}, 2.0f);
+    float maxR = 0.0f;
+    for (const Snowball& b : w.snowballs()) maxR = std::max(maxR, b.radius);
+    REQUIRE(maxR > 85.0f);
+    // Keep plowing: snow must not just vanish into the full ball.
+    const std::size_t before = w.snowballs().size();
+    for (int k = 0; k < 4; ++k) {
+        const float x = 200.0f + 300.0f * static_cast<float>(k);
+        line = lineAt(w, 1, x);
+        movePointer(w, {x, line + 4}, {x + 250.0f, line + 4}, 0.8f, false, true);
+        idlePointer(w, {10, 10}, 1.0f);
+    }
+    CHECK(w.snowballs().size() > before);
+}
+
+TEST(any_number_of_balls_glue_into_a_tower_that_moves_together) {
+    World w = snowyWindow(12);
+    auto ids = makeBalls(w, {30.0f, 22.0f, 16.0f});
+    REQUIRE(ids.size() == 3);
+    // A fourth, small one: a Ctrl+Alt click on the snow.
+    const float x = 1380.0f;
+    const float line = lineAt(w, 1, x);
+    movePointer(w, {x, line - 2}, {x, line - 2}, 0.05f, true, true);
+    REQUIRE(w.holdingSnowball());
+    ids.push_back(w.snowballs().back().id);
+    movePointer(w, {x, line - 2}, {x, line - 2}, 0.05f, false, false);
+    idlePointer(w, {10, 10}, 1.0f);
+    REQUIRE(findBall(w.snowballs(), ids[3]) >= 0);
+    for (std::size_t k = 1; k < ids.size(); ++k) stackOnto(w, ids[k], ids[k - 1]);
+    const auto& balls = w.snowballs();
+    for (std::size_t k = 1; k < ids.size(); ++k) {
+        const int i = findBall(balls, ids[k]);
+        REQUIRE(i >= 0);
+        CHECK(balls[static_cast<std::size_t>(i)].parent == ids[k - 1]);
+    }
+    CHECK(w.snowmen().empty());  // four balls high is a tower, not a snowman
+    auto get = [&](std::uint32_t id) { return w.snowballs()[static_cast<std::size_t>(findBall(w.snowballs(), id))]; };
+    const Snowball base = get(ids[0]);
+    const Vec2 rel = get(ids[3]).pos - base.pos;
+    const Vec2 dest{base.pos.x - 250.0f, base.pos.y - 20.0f};
+    movePointer(w, base.pos, base.pos, 0.05f, true);
+    movePointer(w, base.pos, dest, 0.6f, true);
+    const Vec2 rel2 = get(ids[3]).pos - get(ids[0]).pos;
+    CHECK(length(rel2 - rel) < 6.0f);  // the top ball came along, still in place
+    movePointer(w, dest, dest, 0.05f, false);
+}
+
+TEST(unlimited_mode_lets_piles_grow_past_the_normal_cap) {
+    auto deepest = [](bool unlimited) {
+        World w(13);
+        th::heavySnow(w);
+        SnowConfig cfg = w.config();
+        cfg.flakeMass = 20.0f;
+        cfg.unlimited = unlimited;
+        w.setConfig(cfg);
+        w.setMonitors({makeMonitor(0, 0, 800, 600)});
+        w.setWindows({makeWindow(1, 100, 400, 700, 580)});
+        th::runSeconds(w, 60.0f);
+        float h = 0.0f;
+        const Surface* s = th::findSurface(w, 1);
+        for (std::size_t i = 0; i < s->pile.size(); ++i) h = std::max(h, s->pile.height(i));
+        return h;
+    };
+    const float normal = deepest(false);
+    const float unlimited = deepest(true);
+    CHECK(normal <= 60.5f);
+    CHECK(unlimited > 90.0f);
+}
+
+TEST(balls_set_down_side_by_side_glue_together) {
+    World w = snowyWindow(14);
+    const auto ids = makeBalls(w, {26.0f, 18.0f});
+    REQUIRE(ids.size() == 2);
+    auto get = [&](std::uint32_t id) { return w.snowballs()[static_cast<std::size_t>(findBall(w.snowballs(), id))]; };
+    const Snowball b = get(ids[1]);
+    const Vec2 lifted{b.pos.x, 150.0f};
+    movePointer(w, b.pos, b.pos, 0.05f, true);
+    movePointer(w, b.pos, lifted, 0.3f, true);
+    const Snowball a = get(ids[0]);
+    // Right next to it, at the same height (touching from the side).
+    const Vec2 beside{a.pos.x + a.radius + b.radius - 2.0f, a.pos.y - 2.0f};
+    movePointer(w, lifted, {beside.x, 150.0f}, 0.4f, true);
+    movePointer(w, {beside.x, 150.0f}, beside, 0.3f, true);
+    movePointer(w, beside, beside, 0.2f, true);
+    movePointer(w, beside, beside, 0.05f, false);
+    idlePointer(w, {10, 10}, 2.0f);
+    const Snowball a2 = get(ids[0]), b2 = get(ids[1]);
+    CHECK(a2.parent == b2.id || b2.parent == a2.id);
+}
