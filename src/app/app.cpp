@@ -51,6 +51,7 @@ enum MenuId : UINT {
     kMenuUnlimited = 146,
     kMenuAutostart = 151,
     kMenuHelp = 160,
+    kMenuAuthor = 161,
     kMenuExit = 199,
 };
 
@@ -307,7 +308,8 @@ void App::showHelp() {
                 L"• «Снегопад → Без ограничений» — сугробы растут хоть до верха экрана.\n\n"
                 L"• Дворник (в меню) смахивает снег. Его ось можно перетащить мышкой.\n\n"
                 L"• Ctrl + Alt + S — пауза / продолжить.\n\n"
-                L"• «Лопата» в меню убирает весь снег.",
+                L"• «Лопата» в меню убирает весь снег.\n\n"
+                L"Автор: ypklementev.ru",
                 L"WinTers — как пользоваться", MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
     KillTimer(control_, kTimerModalTick);
 }
@@ -357,6 +359,7 @@ void App::showTrayMenu(POINT at) {
                 L"Запускать вместе с Windows");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kMenuHelp, L"Как пользоваться…");
+    AppendMenuW(menu, MF_STRING, kMenuAuthor, L"Автор: ypklementev.ru");
     AppendMenuW(menu, MF_STRING, kMenuExit, L"Выход");
 
     // Required so the menu closes when the user clicks elsewhere.
@@ -401,6 +404,10 @@ void App::showTrayMenu(POINT at) {
             break;
         case kMenuAutostart:
             SetAutostart(!IsAutostartEnabled());
+            settingsChanged = false;
+            break;
+        case kMenuAuthor:
+            ShellExecuteW(nullptr, L"open", L"https://ypklementev.ru", nullptr, nullptr, SW_SHOWNORMAL);
             settingsChanged = false;
             break;
         case kMenuHelp:
