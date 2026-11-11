@@ -6,6 +6,7 @@
 
 #import <AppKit/AppKit.h>
 #import <QuartzCore/CAMetalLayer.h>
+#import <QuartzCore/QuartzCore.h>
 
 #include "mac/metal_renderer.h"
 #include "mac/screens.h"

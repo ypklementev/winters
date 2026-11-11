@@ -110,18 +110,13 @@
     _panel.level = CGWindowLevelForKey(kCGDockWindowLevelKey) - 1;
     _panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary |
                                 NSWindowCollectionBehaviorIgnoresCycle | NSWindowCollectionBehaviorFullScreenAuxiliary;
-    // Experiment hooks (Space-switch behaviour can only be checked by eye):
-    //   defaults write <bundle id> DebugOverlayLevel -int <level>
-    //   defaults write <bundle id> DebugOverlayBehavior -int <NSWindowCollectionBehavior bits>
-    NSUserDefaults* defaults = NSUserDefaults.standardUserDefaults;
-    if (id level = [defaults objectForKey:@"DebugOverlayLevel"]) _panel.level = [level integerValue];
-    if (id behavior = [defaults objectForKey:@"DebugOverlayBehavior"]) {
-        @try {
-            _panel.collectionBehavior = static_cast<NSWindowCollectionBehavior>([behavior unsignedIntegerValue]);
-        } @catch (NSException* e) {
-            NSLog(@"WinTers: DebugOverlayBehavior %@ rejected: %@", behavior, e.reason);
-        }
-    }
+    // The three-finger swipe between Spaces hides windows that are on all
+    // Spaces until the swipe ends (Cmd+Tab doesn't); no API keeps them shown.
+    // Fade the snow back in instead of popping it.
+    [NSNotificationCenter.defaultCenter addObserver:self
+                                           selector:@selector(occlusionChanged:)
+                                               name:NSWindowDidChangeOcclusionStateNotification
+                                             object:_panel];
     _clickThrough = YES;
 
     _view = [[WTOverlayView alloc] initWithFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height)];
@@ -151,7 +146,23 @@
     return self;
 }
 
+- (void)occlusionChanged:(NSNotification*)note {
+    const BOOL shown = (_panel.occlusionState & NSWindowOcclusionStateVisible) != 0;
+    if (!shown) {
+        _panel.alphaValue = 0.0;
+        return;
+    }
+    if (_panel.alphaValue >= 1.0) return;
+    WTOverlayPanel* panel = _panel;
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext* ctx) {
+      ctx.duration = 0.4;
+      ctx.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+      panel.animator.alphaValue = 1.0;
+    }];
+}
+
 - (void)close {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
     [_panel orderOut:nil];
     [_panel close];
     _panel = nil;
