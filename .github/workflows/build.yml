@@ -11,19 +11,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure (VS 2022, x64)
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-
-      - name: Build
-        run: cmake --build build --config Release --parallel
+      # Portable exe + MSIX (unsigned) + a test-signed MSIX copy, all via build.ps1.
+      - name: Build exe + MSIX
+        shell: pwsh
+        run: ./build.ps1 -Target all -TestSign
 
       - name: Test sim
-        run: ctest --test-dir build -C Release --output-on-failure
+        run: ctest --test-dir build/msvc -C Release --output-on-failure
+
+      # Smoke test: the package is valid and installs. Runner images may lack the
+      # AppX deployment service, so this step only warns.
+      - name: Install test-signed MSIX
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Import-Certificate -FilePath dist/WinTers_TestCert.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+          $pkg = Get-ChildItem dist/*_testsigned.msix | Select-Object -First 1
+          Add-AppxPackage -Path $pkg.FullName
+          Get-AppxPackage AfterHoursLabs.WinTers | Format-List Name, Version, InstallLocation
+          Get-AppxPackage AfterHoursLabs.WinTers | Remove-AppxPackage
 
       - uses: actions/upload-artifact@v4
         with:
           name: WinTers-x64
-          path: build/Release/WinTers.exe
+          path: dist/WinTers_*_x64.exe
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinTers-msix
+          path: |
+            dist/WinTers_*_x64.msix
+            dist/WinTers_*_x64_testsigned.msix
+            dist/WinTers_TestCert.cer
           if-no-files-found: error
 
   sim-tests-linux:

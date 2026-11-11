@@ -44,6 +44,27 @@ target_link_libraries(winters_atlas PUBLIC winters_sim)
 # ---------------------------------------------------------------------------
 if(WIN32)
     enable_language(RC)
+
+    # The version lives only in project(): it goes into VERSIONINFO (version.h),
+    # the MSIX manifest (X.Y.Z.0: the Store wants the 4th part to be 0) and
+    # version.txt, which build.ps1 uses to name the files in dist/.
+    if(PROJECT_VERSION_PATCH STREQUAL "" OR NOT PROJECT_VERSION_TWEAK STREQUAL "")
+        message(FATAL_ERROR "project(VERSION) must be X.Y.Z, got ${PROJECT_VERSION}")
+    endif()
+    set(WINTERS_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+    configure_file(src/app/version.h.in ${WINTERS_GEN_DIR}/version.h @ONLY)
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/version.txt "${PROJECT_VERSION}")
+
+    # MaxVersionTested = the SDK this build uses (build.ps1 picks it via CMAKE_SYSTEM_VERSION).
+    if(CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION)
+        set(WINTERS_SDK_VERSION ${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION})
+    elseif(CMAKE_SYSTEM_VERSION MATCHES "^10\\.0\\.[0-9]+\\.[0-9]+$")
+        set(WINTERS_SDK_VERSION ${CMAKE_SYSTEM_VERSION})
+    else()
+        set(WINTERS_SDK_VERSION 10.0.18362.0)
+    endif()
+    set(WINTERS_MSIX_VERSION ${PROJECT_VERSION}.0)
+    configure_file(packaging/AppxManifest.xml ${CMAKE_CURRENT_BINARY_DIR}/msix/AppxManifest.xml @ONLY)
     add_executable(WinTers WIN32
         src/app/main.cpp
         src/app/app.cpp
@@ -51,6 +72,7 @@ if(WIN32)
         src/app/icon.cpp
         src/app/settings.cpp
         src/app/autostart.cpp
+        src/app/package.cpp
         src/app/power.cpp
         src/app/resources.rc
         src/input/input.cpp
@@ -65,6 +87,7 @@ if(WIN32)
         winters_atlas
         d3d11 dxgi dcomp dwmapi shcore user32 gdi32 shell32 ole32 uuid advapi32 wtsapi32
     )
+    target_include_directories(WinTers PRIVATE ${WINTERS_GEN_DIR})
     target_compile_definitions(WinTers PRIVATE
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
         _WIN32_WINNT=0x0A00 WINVER=0x0A00 NTDDI_VERSION=0x0A000007
@@ -72,6 +95,15 @@ if(WIN32)
     if(MSVC)
         # The manifest comes from resources.rc; don't let link.exe add another.
         target_link_options(WinTers PRIVATE /MANIFEST:NO)
+        # C++/WinRT (StartupTask in MSIX mode). VS normally has Include\<sdk>\cppwinrt
+        # on the include path already; add it explicitly in case it does not.
+        target_link_libraries(WinTers PRIVATE windowsapp)
+        get_filename_component(WINTERS_KITS_ROOT
+            "[HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots;KitsRoot10]" ABSOLUTE)
+        set(WINTERS_CPPWINRT_DIR "${WINTERS_KITS_ROOT}/Include/${WINTERS_SDK_VERSION}/cppwinrt")
+        if(EXISTS "${WINTERS_CPPWINRT_DIR}/winrt/base.h")
+            target_include_directories(WinTers SYSTEM PRIVATE "${WINTERS_CPPWINRT_DIR}")
+        endif()
     else()
         target_link_options(WinTers PRIVATE -municode -static -static-libgcc -static-libstdc++)
     endif()
