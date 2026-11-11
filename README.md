@@ -5,6 +5,8 @@
 
 Нативное приложение на C++20 + Win32 + Direct3D 11 + DirectComposition: один exe без зависимостей и без установщика.
 
+[Установить из Microsoft Store](https://apps.microsoft.com/detail/9PNZ9T3SS34X) (`ms-windows-store://pdp/?ProductId=9PNZ9T3SS34X`) или скачать portable-exe из релизов.
+
 ## Возможности
 
 - **Снегопад на всех мониторах.** В основном это мелкие крупинки, среди них крупные кристаллы-дендриты, ледяные пластинки и слипшиеся комья.
@@ -32,25 +34,114 @@
 - **Горячая клавиша паузы:** **Ctrl + Alt + S**.
 - **Автопауза.** Снег сам ставится на паузу при блокировке и сне, а также на батарее в режиме энергосбережения.
 - **Настройки** хранятся в `%APPDATA%\WinTers\settings.ini`. Настройки и автозапуск от старой версии (WinFlake) переносятся сами.
+  Версия из Store пишет настройки в свою папку пакета (`%LOCALAPPDATA%\Packages\AfterHoursLabs.WinTers_…\LocalCache\Roaming\WinTers`), но при первом запуске видит настройки portable-версии и продолжает с них.
 
 ## Требования
 
 - Windows 10 1903+ или Windows 11, x64.
 - Видеокарта с Direct3D 10+. Если её нет, используется программный рендер WARP.
 
-## Сборка на Windows (MSVC)
+## Две сборки из одного кода
 
-Нужны **Visual Studio 2022 Build Tools**: workload «Desktop development with C++» с MSVC v143 и Windows 11 SDK. CMake 3.21+ входит в их состав.
+Один и тот же `WinTers.exe` работает и как portable-программа, и внутри MSIX-пакета из Microsoft Store.
+Режим определяется при запуске (`GetCurrentPackageFullName`, `src/app/package.cpp`). Разница только в автозапуске:
 
-В «Developer PowerShell for VS 2022» выполни:
+| | portable exe | MSIX (Store) |
+|---|---|---|
+| Автозапуск | ключ `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` | `StartupTask` с id `WinTersStartup` (C++/WinRT) |
+| Настройки | `%APPDATA%\WinTers\settings.ini` | то же, Windows перенаправляет запись в папку пакета |
+| Второй экземпляр | mutex `Local\WinTers.SingleInstance`, общий для обеих версий | |
+
+MSIX при каждом запуске удаляет ключ `Run` от portable-версии, чтобы при входе в Windows не стартовали две копии.
+Если в MSIX автозапуск выключен в «Параметры → Приложения → Автозагрузка», пункт меню становится неактивным и подсказывает, где его включить.
+
+Версия задаётся в одном месте: `project(WinTers VERSION X.Y.Z)` в `CMakeLists.txt`.
+CMake прокидывает её в ресурс VERSIONINFO (`src/app/version.h.in`) и в манифест MSIX как `X.Y.Z.0` (Store требует 0 в четвёртой части).
+
+## Сборка portable exe
+
+Нужны **Visual Studio 2022+** с workload «Desktop development with C++» (MSVC x64 и Windows 11 SDK; CMake входит в комплект).
+В PowerShell в корне репозитория:
 
 ```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure   # тесты симуляции
+.\build.ps1 -Target exe
 ```
 
-Готовый файл: `build\Release\WinTers.exe`. CRT слинкован статически, поэтому VC++ Redistributable не нужен.
+Результат: `dist\WinTers_<версия>_x64.exe`. CRT слинкован статически, поэтому VC++ Redistributable не нужен.
+Скрипт сам находит самый новый Windows SDK, в котором есть makeappx, makepri, signtool и C++/WinRT. Если такого SDK нет, он останавливается и ничего не скачивает.
+Сборка лежит в `build\msvc`, тесты симуляции: `ctest --test-dir build\msvc -C Release --output-on-failure`.
+
+Если PowerShell запрещает скрипты: `powershell -ExecutionPolicy Bypass -File .\build.ps1`.
+
+## Сборка MSIX
+
+```powershell
+.\build.ps1 -Target msix              # только MSIX
+.\build.ps1                           # exe + MSIX (-Target all)
+.\build.ps1 -Target msix -TestSign    # + копия, подписанная тестовым сертификатом
+```
+
+- `dist\WinTers_<версия>_x64.msix` — неподписанный пакет. **Его загружают в Store**, Microsoft подписывает его сама.
+- `dist\WinTers_<версия>_x64_testsigned.msix` и `dist\WinTers_TestCert.cer` (только с `-TestSign`) — для установки на своём компьютере.
+
+Что делает скрипт: собирает layout в `build\msvc\msix\layout` (exe, `AppxManifest.xml`, `Assets`), создаёт `resources.pri` через makepri и упаковывает пакет через makeappx.
+С `-TestSign` он один раз создаёт в `Cert:\CurrentUser\My` самоподписанный сертификат с Subject `CN=BEB569F2-AE9B-46F2-8C45-1FB02FB35E6E` (как Publisher в манифесте) и подписывает копию пакета через signtool.
+
+Установка тестового пакета:
+
+```powershell
+# один раз, PowerShell от администратора: доверить тестовый сертификат
+Import-Certificate -FilePath .\dist\WinTers_TestCert.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+# обычный PowerShell
+Add-AppxPackage -Path .\dist\WinTers_<версия>_x64_testsigned.msix
+# удалить
+Get-AppxPackage AfterHoursLabs.WinTers | Remove-AppxPackage
+```
+
+Файлы пакета:
+- `packaging/AppxManifest.xml` — шаблон манифеста. Версию и `MaxVersionTested` (версия SDK, которым собирали) подставляет CMake в `build\msvc\msix\AppxManifest.xml`.
+- `packaging/Assets/*.png` — логотипы. Генерируются из той же снежинки, что и иконка exe: `python3 tools/make_store_assets.py`.
+
+## Проверка перед релизом
+
+### Обе сборки
+
+1. Запустить exe (portable) или WinTers из меню «Пуск» (MSIX): в трее появилась снежинка, снег идёт **на всех мониторах**.
+2. Второй запуск (в том числе portable при запущенной MSIX и наоборот) ничего не открывает.
+3. Трей: пауза, Ctrl + Alt + S, режимы снегопада и ветра, дворник, «Лопата», «Как пользоваться…», ссылка на сайт, «Выход».
+4. Поменять снегопад и ветер, выйти, запустить снова: настройки сохранились.
+5. Включить «Запускать вместе с Windows», перезагрузиться: WinTers запустился сам. Выключить, перезагрузиться: не запустился.
+6. Удаление. Portable: выключить автозапуск, выйти и удалить exe (настройки остаются в `%APPDATA%\WinTers`). MSIX: «Параметры → Приложения → WinTers → Удалить», автозапуск исчезает вместе с пакетом.
+
+### Только MSIX
+
+7. Установка через `Add-AppxPackage` (см. выше), запуск из «Пуск», в списке приложений правильная иконка и название.
+8. Выключить WinTers в «Параметры → Приложения → Автозагрузка»: в меню трея пункт автозапуска стал неактивным с подсказкой.
+9. Если до этого стояла portable-версия с автозапуском: после первого запуска MSIX в `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (regedit) **не должно** остаться значения `WinTers`.
+   Если оно осталось (Windows не дала пакету удалить ключ), двойного запуска всё равно не будет: вторую копию остановит mutex.
+10. Настройки portable-версии подхватились при первом запуске MSIX.
+
+### Windows App Certification Kit
+
+WACK входит в Windows SDK. Проверка пакета, PowerShell **от администратора**:
+
+```powershell
+$appcert = "${env:ProgramFiles(x86)}\Windows Kits\10\App Certification Kit\appcert.exe"
+& $appcert reset
+& $appcert test -appxpackagepath "$PWD\dist\WinTers_<версия>_x64_testsigned.msix" -reportoutputpath "$PWD\dist\wack.xml"
+```
+
+WACK устанавливает пакет, поэтому ему нужна подписанная копия с доверенным сертификатом. Итог (`OVERALL_RESULT`) в `dist\wack.xml` должен быть `PASS`.
+Предупреждение про `runFullTrust` ожидаемо: для настольных приложений это нормально.
+
+## Публикация в Microsoft Store
+
+1. **Поднять версию** в `CMakeLists.txt`: `project(WinTers VERSION 0.1.2 ...)`. Store не принимает пакет с той же или меньшей версией, чем уже опубликованная.
+2. **Собрать:** `.\build.ps1 -TestSign`.
+3. **Проверить** по чек-листу выше и прогнать WACK на `_testsigned.msix`.
+4. **Загрузить** в Partner Center → WinTers (9PNZ9T3SS34X) → новая отправка → «Пакеты» файл `dist\WinTers_<версия>_x64.msix` (**неподписанный**, без `_testsigned`).
+5. В «Сведениях» о `runFullTrust` объяснить: приложение рисует прозрачный оверлей поверх рабочего стола и следит за положением окон, это настольное Win32-приложение.
+   Политика конфиденциальности: `PRIVACY.md` в репозитории.
 
 ## Сборка без Windows (macOS / Linux)
 
@@ -74,6 +165,7 @@ x86_64-w64-mingw32-strip build/win/WinTers.exe   # необязательно: ~
 ```
 
 Exe собирается статически, его можно сразу копировать на Windows.
+В mingw нет C++/WinRT, поэтому такой exe годится только как portable: внутри MSIX автозапуск в нём будет недоступен. Пакеты для Store собирает только `build.ps1` (MSVC).
 
 ### Проверка шейдеров без Windows
 
@@ -88,7 +180,8 @@ for e in vs_disc:vert vs_pile:vert ps_flake:frag ps_ball:frag ps_pile:frag; do
 ### GitHub Actions
 
 `.github/workflows/build.yml` на каждый push:
-- собирает `WinTers.exe` на MSVC (артефакт **WinTers-x64**);
+- запускает `build.ps1 -Target all -TestSign` на MSVC и выкладывает артефакты **WinTers-x64** (portable exe) и **WinTers-msix** (неподписанный и тестовый пакеты, сертификат);
+- пробует установить тестовый пакет (`Add-AppxPackage`). Это проверка, что манифест и подпись корректны; на раннере она может не сработать и только предупреждает;
 - гоняет тесты симуляции на MSVC и на Linux с ASan/UBSan.
 
 ## Запуск
@@ -104,13 +197,15 @@ Exe не подписан, поэтому Windows SmartScreen может пок�
 src/
   sim/              чистый C++: снежинки, поле ветра, сугробы (карты высот), видимость по z-order,
                     варежка, снежки. Без WinAPI, покрыт тестами (tests/).
-  app/              wWinMain, цикл, трей и меню, settings.ini, автозапуск, автопауза, манифест, иконка
+  app/              wWinMain, цикл, трей и меню, settings.ini, автозапуск (Run / StartupTask), режим MSIX, автопауза, манифест, иконка
   overlay/          прозрачное click-through окно на весь виртуальный экран; список мониторов
   render/           D3D11 + DirectComposition; 3 инстансных draw call: сугробы, снежки, снежинки;
                     flake_atlas — процедурный атлас спрайтов (чистый C++, тоже под тестами)
   windows_tracker/  окна верхнего уровня: EnumWindows + DWM-границы + SetWinEventHook
   input/            курсор и клавиши опросом каждый кадр (без хуков), Ctrl+Alt+S
-tools/make_icon.py  генератор src/app/snowflake.ico
+packaging/          шаблон AppxManifest.xml и логотипы MSIX
+tools/make_icon.py  генератор src/app/snowflake.ico; make_store_assets.py — логотипы MSIX
+build.ps1           сборка portable exe и MSIX в dist/
 ```
 
 - **Оверлей.** Окно `WS_EX_NOREDIRECTIONBITMAP | TRANSPARENT | LAYERED | TOPMOST | TOOLWINDOW | NOACTIVATE`.

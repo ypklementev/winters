@@ -11,11 +11,14 @@ import zlib
 from pathlib import Path
 
 
-def draw(size):
+def draw(size, fit=False):
+    """RGBA rows of a size x size snowflake. At large sizes the arm tips plus the
+    outline overrun the square; fit=True scales the flake down so it fits."""
+    k = 0.5 / (0.44 + 1 / 18.0 + 1 / 22.0) * 0.98 if fit else 1.0
     c = size * 0.5
-    arm = size * 0.44
-    half = max(0.9, size / 18.0)
-    outline = max(1.0, size / 22.0)
+    arm = size * 0.44 * k
+    half = max(0.9, size / 18.0 * k)
+    outline = max(1.0, size / 22.0 * k)
     segs = []
     for k in range(6):
         a = k * math.pi / 3 + math.pi / 2
@@ -48,11 +51,12 @@ def draw(size):
     return b"".join(rows)
 
 
-def png(size, raw):
+def png(size, raw, height=None):
+    """RGBA PNG; `raw` is rows of [filter byte + width*4 bytes]. Square unless `height` is given."""
     def chunk(tag, data):
         return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
 
-    ihdr = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)
+    ihdr = struct.pack(">IIBBBBB", size, height or size, 8, 6, 0, 0, 0)
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b"")
 
 

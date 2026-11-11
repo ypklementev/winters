@@ -336,23 +336,39 @@ TEST(snowman_built_by_hand_gets_decorated) {
 // --- regressions: full balls, any number glued, unlimited piles -------------------
 
 TEST(plowing_next_to_a_full_size_ball_still_makes_balls) {
+    // One steady push along the snowy window: the ball grows to its size limit
+    // about halfway. Keep pushing it through fresh snow: that snow must start new
+    // balls in front instead of vanishing into the full one. (With the old bug
+    // 0-1 new balls appeared over the next 300 px, with the fix 2-3: checked on
+    // 100 seeds. Earlier versions of this test plowed fixed spots after the push,
+    // which could land on already cleared snow or on a smaller ball that rightly
+    // took the snow, so the result depended on the platform's libm.)
     World w = snowyWindow(11);
-    // One long push: a ball that hits the size limit.
-    float line = lineAt(w, 1, 150.0f);
-    movePointer(w, {150, line + 4}, {1350, line + 4}, 3.0f, false, true);
-    idlePointer(w, {10, 10}, 2.0f);
-    float maxR = 0.0f;
-    for (const Snowball& b : w.snowballs()) maxR = std::max(maxR, b.radius);
-    REQUIRE(maxR > 85.0f);
-    // Keep plowing: snow must not just vanish into the full ball.
-    const std::size_t before = w.snowballs().size();
-    for (int k = 0; k < 4; ++k) {
-        const float x = 200.0f + 300.0f * static_cast<float>(k);
-        line = lineAt(w, 1, x);
-        movePointer(w, {x, line + 4}, {x + 250.0f, line + 4}, 0.8f, false, true);
-        idlePointer(w, {10, 10}, 1.0f);
+    const Vec2 vel{400.0f, 0.0f};
+    Vec2 pos{150.0f, lineAt(w, 1, 150.0f) + 4.0f};
+    float fullAt = -1.0f;
+    std::uint32_t lastIdWhenFull = 0;
+    while (pos.x < 1450.0f && (fullAt < 0.0f || pos.x < fullAt + 300.0f)) {
+        PointerInput p;
+        p.valid = true;
+        p.pos = pos;
+        p.vel = vel;
+        p.sculpt = true;
+        w.setPointer(p);
+        w.step(kFixedDt);
+        pos.x += vel.x * kFixedDt;
+        if (fullAt >= 0.0f) continue;
+        for (const Snowball& b : w.snowballs()) {
+            if (b.radius > 88.0f) fullAt = pos.x;
+        }
+        if (fullAt >= 0.0f) {
+            for (const Snowball& b : w.snowballs()) lastIdWhenFull = std::max(lastIdWhenFull, b.id);
+        }
     }
-    CHECK(w.snowballs().size() > before);
+    REQUIRE(fullAt > 0.0f);
+    int newBalls = 0;
+    for (const Snowball& b : w.snowballs()) newBalls += b.id > lastIdWhenFull ? 1 : 0;
+    CHECK(newBalls >= 2);
 }
 
 TEST(any_number_of_balls_glue_into_a_tower_that_moves_together) {

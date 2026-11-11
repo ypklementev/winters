@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity type="win32" name="WinTers" version="0.1.1.0" processorArchitecture="*"/>
+  <!-- Side-by-side identity, not the product version (that is VERSIONINFO, from CMake). -->
+  <assemblyIdentity type="win32" name="WinTers" version="1.0.0.0" processorArchitecture="*"/>
   <description>WinTers - snow on your desktop</description>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>

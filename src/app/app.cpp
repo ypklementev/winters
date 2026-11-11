@@ -355,8 +355,32 @@ void App::showTrayMenu(POINT at) {
     AppendMenuW(menu, MF_STRING | (settings_.wiper ? MF_CHECKED : 0u), kMenuWiper, L"Дворник");
     AppendMenuW(menu, MF_STRING, kMenuShovel, L"Лопата: убрать весь снег");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING | (IsAutostartEnabled() ? MF_CHECKED : 0u), kMenuAutostart,
-                L"Запускать вместе с Windows");
+    UINT autostartFlags = MF_STRING;
+    const wchar_t* autostartText = L"Запускать вместе с Windows";
+    switch (GetAutostartState()) {
+        case AutostartState::Enabled:
+            autostartFlags |= MF_CHECKED;
+            break;
+        case AutostartState::Disabled:
+            break;
+        case AutostartState::DisabledByUser:
+            autostartFlags |= MF_GRAYED;
+            autostartText = L"Запуск с Windows выключен в Параметрах (Приложения → Автозагрузка)";
+            break;
+        case AutostartState::DisabledByPolicy:
+            autostartFlags |= MF_GRAYED;
+            autostartText = L"Запуск с Windows запрещён администратором";
+            break;
+        case AutostartState::EnabledByPolicy:
+            autostartFlags |= MF_GRAYED | MF_CHECKED;
+            autostartText = L"Запускать вместе с Windows (задано администратором)";
+            break;
+        case AutostartState::Unavailable:
+            autostartFlags |= MF_GRAYED;
+            autostartText = L"Запуск с Windows недоступен";
+            break;
+    }
+    AppendMenuW(menu, autostartFlags, kMenuAutostart, autostartText);
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kMenuHelp, L"Как пользоваться…");
     AppendMenuW(menu, MF_STRING, kMenuAuthor, L"Автор: ypklementev.ru");
@@ -403,7 +427,7 @@ void App::showTrayMenu(POINT at) {
             placeWiper();
             break;
         case kMenuAutostart:
-            SetAutostart(!IsAutostartEnabled());
+            SetAutostart(GetAutostartState() != AutostartState::Enabled);
             settingsChanged = false;
             break;
         case kMenuAuthor:

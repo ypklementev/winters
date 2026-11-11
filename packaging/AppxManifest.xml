@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX manifest template. CMake fills in @WINTERS_MSIX_VERSION@ (project() version + ".0")
+  and @WINTERS_SDK_VERSION@ (the Windows SDK used by the build) and writes the result to
+  <build>/msix/AppxManifest.xml; build.ps1 packs that one.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap5 rescap">
+
+  <Identity
+    Name="AfterHoursLabs.WinTers"
+    Publisher="CN=BEB569F2-AE9B-46F2-8C45-1FB02FB35E6E"
+    Version="@WINTERS_MSIX_VERSION@"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>WinTers</DisplayName>
+    <PublisherDisplayName>AfterHoursLabs</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.18362.0" MaxVersionTested="@WINTERS_SDK_VERSION@" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="ru-RU" />
+    <Resource Language="en-US" />
+  </Resources>
+
+  <Applications>
+    <Application Id="WinTers" Executable="WinTers.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="WinTers"
+        Description="Snow on your desktop"
+        AppListEntry="default"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <uap5:Extension Category="windows.startupTask" Executable="WinTers.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap5:StartupTask TaskId="WinTersStartup" Enabled="false" DisplayName="WinTers" />
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>
