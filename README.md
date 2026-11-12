@@ -99,3 +99,12 @@ xattr -dr com.apple.quarantine /Applications/WinTers.app
 ## Автор
 
 [ypklementev.ru](https://ypklementev.ru)
+
+## License
+
+Copyright (C) 2026 Yaroslav Klementev (After Hours Labs)
+
+WinTers is licensed under the GNU General Public License v3.0 — see LICENSE.
+
+The name "WinTers", the After Hours Labs name, logos and icons are not covered
+by this license. Forks must use a different name and branding.
