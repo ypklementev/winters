@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "sim/flakes.h"
+#include "sim/garlands.h"
 #include "sim/rng.h"
 #include "sim/snowballs.h"
 #include "sim/surfaces.h"
@@ -83,6 +84,11 @@ public:
     // A snowball or the wiper is being dragged.
     bool holdingSomething() const { return holdingSnowball() || wiperHeld_; }
     HitKind hitTest(Vec2 p) const;
+
+    // --- garlands -------------------------------------------------------------
+    void setGarlandConfig(const GarlandConfig& cfg) { garlandCfg_ = cfg; }
+    const GarlandConfig& garlandConfig() const { return garlandCfg_; }
+    const std::vector<Festoon>& festoons() const { return garlands_.festoons(); }
 
     // --- wiper ----------------------------------------------------------------
     void setWiperEnabled(bool on) { wiper_.setEnabled(on); }
@@ -168,6 +174,8 @@ private:
     double lastPlowTime_ = -1.0;
 
     Wiper wiper_;
+    GarlandConfig garlandCfg_;
+    Garlands garlands_;
     bool wiperHeld_ = false;
     bool wiperMoved_ = false;
 

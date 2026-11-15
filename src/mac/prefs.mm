@@ -24,6 +24,8 @@ sim::UserSettings LoadSettings() {
     s.wiperY = ReadInt(d, @"WiperY", 0);
     s.unlimited = ReadInt(d, @"Unlimited", 0) != 0;
     s.ezMode = ReadInt(d, @"EZMode", 0) != 0;
+    s.garland = static_cast<sim::GarlandColors>(ReadInt(d, @"Garland", static_cast<int>(s.garland)));
+    s.garlandBlink = static_cast<sim::GarlandBlink>(ReadInt(d, @"GarlandBlink", static_cast<int>(s.garlandBlink)));
     return sim::sanitize(s);
 }
 
@@ -38,6 +40,8 @@ void SaveSettings(const sim::UserSettings& s) {
     [d setInteger:s.wiperY forKey:@"WiperY"];
     [d setInteger:s.unlimited ? 1 : 0 forKey:@"Unlimited"];
     [d setInteger:s.ezMode ? 1 : 0 forKey:@"EZMode"];
+    [d setInteger:static_cast<int>(s.garland) forKey:@"Garland"];
+    [d setInteger:static_cast<int>(s.garlandBlink) forKey:@"GarlandBlink"];
 }
 
 LoginItemState GetLoginItemState() {

@@ -57,7 +57,10 @@ int main(int argc, const char** argv) {
         sim::UserSettings us;
         us.intensity = sim::Intensity::Blizzard;
         us.wiper = true;
+        us.garland = sim::GarlandColors::Multi;
+        us.garlandBlink = sim::GarlandBlink::Twinkle;
         world.setConfig(sim::toSnowConfig(us));
+        world.setGarlandConfig(sim::toGarlandConfig(us));
         sim::Monitor m;
         m.bounds = {0, 0, kWidthPt * kScale, kHeightPt * kScale};
         m.work = {0, 25 * kScale, kWidthPt * kScale, (kHeightPt - 70) * kScale};

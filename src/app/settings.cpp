@@ -66,6 +66,8 @@ sim::UserSettings LoadSettings() {
     s.wiperY = read(L"WiperY", 0);
     s.unlimited = read(L"Unlimited", 0) != 0;
     s.ezMode = read(L"EZMode", 0) != 0;
+    s.garland = static_cast<sim::GarlandColors>(read(L"Garland", static_cast<int>(s.garland)));
+    s.garlandBlink = static_cast<sim::GarlandBlink>(read(L"GarlandBlink", static_cast<int>(s.garlandBlink)));
     s = sim::sanitize(s);
     if (migrate) SaveSettings(s);
     return s;
@@ -83,4 +85,6 @@ void SaveSettings(const sim::UserSettings& s) {
     WriteInt(path, L"WiperY", s.wiperY);
     WriteInt(path, L"Unlimited", s.unlimited ? 1 : 0);
     WriteInt(path, L"EZMode", s.ezMode ? 1 : 0);
+    WriteInt(path, L"Garland", static_cast<int>(s.garland));
+    WriteInt(path, L"GarlandBlink", static_cast<int>(s.garlandBlink));
 }

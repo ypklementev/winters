@@ -23,7 +23,7 @@ struct BallInstance {
 };
 
 // a = (centre.x, centre.y, halfLength, halfWidth), b = (angle, r, g, b),
-// c = (alpha, shine, type, 0). type: 0 capsule, 1 triangle, 2 trapezoid.
+// c = (alpha, shine, type, 0). type: 0 capsule, 1 triangle, 2 trapezoid, 3 glow.
 struct ShapeInstance {
     float cx, cy, halfLength, halfWidth;
     float angle, r, g, b;

@@ -1,5 +1,5 @@
-// Solid vector shapes drawn on top of the snow: the windshield wiper and
-// snowman decorations (bucket hat, carrot nose, eyes, smile, buttons, twig
+// Solid vector shapes drawn on top of the snow: garland lights, the
+// windshield wiper and snowman decorations (bucket hat, carrot nose, eyes, smile, buttons, twig
 // arms). Pure C++ so the layout can be previewed and tested off Windows.
 #pragma once
 
@@ -11,7 +11,9 @@ class World;
 
 namespace shapes {
 
-enum Type { kCapsule = 0, kTriangle = 1, kTrapezoid = 2 };
+// kGlow: soft radial halo of radius halfLength, lighter-than-alpha (light
+// from a garland bulb); halfWidth is ignored.
+enum Type { kCapsule = 0, kTriangle = 1, kTrapezoid = 2, kGlow = 3 };
 
 struct Shape {
     float cx, cy;                 // centre, px

@@ -1311,6 +1311,11 @@ void World::step(float dt) {
     stepBalls(dt);
     relaxPiles();
     erodePiles(dt);
+    if (garlandCfg_.enabled()) {
+        garlands_.update(dt, surfaces_, windNow_);
+    } else {
+        garlands_.clear();
+    }
     prevPointer_ = pointer_.pos;
     havePrevPointer_ = pointer_.valid;
 }

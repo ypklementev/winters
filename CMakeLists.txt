@@ -30,6 +30,7 @@ endif()
 # ---------------------------------------------------------------------------
 add_library(winters_sim STATIC
     src/sim/flakes.cpp
+    src/sim/garlands.cpp
     src/sim/heightmap.cpp
     src/sim/surfaces.cpp
     src/sim/snowballs.cpp
@@ -181,6 +182,7 @@ if(WINTERS_BUILD_TESTS)
         tests/test_atlas.cpp
         tests/test_wiper_plow.cpp
         tests/test_instances.cpp
+        tests/test_garlands.cpp
     )
     target_link_libraries(sim_tests PRIVATE winters_render)
     target_include_directories(sim_tests PRIVATE tests)
