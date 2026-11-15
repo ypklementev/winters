@@ -1,9 +1,17 @@
 name: build
 
+# Branches are built through their pull request; pushes build only main.
+# A branch without a PR: Actions -> build -> Run workflow (or gh workflow run build --ref <branch>).
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
+
+# A newer push to the same branch / PR cancels the run still in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 # Each job runs only when files it builds from have changed: a README edit builds
 # nothing, a src/mac/ edit builds only macOS. workflow_dispatch builds everything.
