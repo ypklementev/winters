@@ -40,6 +40,7 @@ enum MenuId : NSInteger {
     kMenuShovel = 140,
     kMenuWiper = 145,
     kMenuUnlimited = 146,
+    kMenuEzMode = 147,
     kMenuLoginItem = 151,
     kMenuHelp = 160,
     kMenuAuthor = 161,
@@ -488,6 +489,7 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
     [snow addItem:[self radio:@"Метель" tag:kMenuBlizzard on:_settings.intensity == sim::Intensity::Blizzard]];
     [snow addItem:NSMenuItem.separatorItem];
     [snow addItem:[self radio:@"Без ограничений (сугробы до верха экрана)" tag:kMenuUnlimited on:_settings.unlimited]];
+    [snow addItem:[self radio:@"EZ-режим (снег только на окнах)" tag:kMenuEzMode on:_settings.ezMode]];
     NSMenuItem* snowItem = [[NSMenuItem alloc] initWithTitle:@"Снегопад" action:nil keyEquivalent:@""];
     snowItem.submenu = snow;
     [menu addItem:snowItem];
@@ -567,6 +569,9 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
             break;
         case kMenuUnlimited:
             _settings.unlimited = !_settings.unlimited;
+            break;
+        case kMenuEzMode:
+            _settings.ezMode = !_settings.ezMode;
             break;
         case kMenuWiper:
             _settings.wiper = !_settings.wiper;

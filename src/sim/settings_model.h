@@ -20,6 +20,7 @@ struct UserSettings {
     int wiperX = 0;            // pivot, physical screen px
     int wiperY = 0;
     bool unlimited = false;    // "Без ограничений": piles grow up to the screen top
+    bool ezMode = false;       // "EZ-режим": snow lies only on windows
 };
 
 inline UserSettings sanitize(UserSettings s) {
@@ -61,6 +62,7 @@ inline SnowConfig toSnowConfig(const UserSettings& in) {
         c.unlimited = true;
         c.maxFlakes *= 3;
     }
+    c.onlyWindows = s.ezMode;
     static constexpr float kStrength[] = {0.0f, 25.0f, 60.0f, 120.0f};
     const float speed = kStrength[s.windStrength];
     c.wind = s.windDirection == WindDirection::Left    ? -speed

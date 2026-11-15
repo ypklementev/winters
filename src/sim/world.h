@@ -32,6 +32,9 @@ struct SnowConfig {
     // No cap on how deep snow piles up (up to the top of the screen), more
     // snowballs and a larger flake pool.
     bool unlimited = false;
+    // EZ mode: snow lies only on window edges. Screen bottoms and taskbars
+    // collect nothing (flakes fall through), but snowballs still rest on them.
+    bool onlyWindows = false;
 };
 
 struct PointerInput {
@@ -133,8 +136,10 @@ private:
     void shatter(std::size_t i);
     bool isAncestor(std::uint32_t maybeAncestor, const Snowball& b) const;
     int ballIndex(std::uint32_t id) const;  // fast findBall (balls_ is sorted by id)
-    int rootOf(std::size_t i) const;
-    float pileCap(const Surface& s) const;  // max pile height on this surface        // the free ball a glued cluster hangs from
+    int rootOf(std::size_t i) const;  // the free ball a glued cluster hangs from
+    float pileCap(const Surface& s) const;  // max pile height on this surface
+    // False for screen bottoms and taskbars in EZ mode (balls still collide).
+    bool holdsSnow(const Surface& s) const { return !cfg_.onlyWindows || (!s.ground && !s.taskbar); }
     // heldPointerY: for a dragged ball, the cursor y. Surfaces the cursor has
     // been pulled well below are passed through (lets you lift a ball off a ledge).
     void collideBallWithSurfaces(Snowball& b, float dt, float heldPointerY = kNoSurface);

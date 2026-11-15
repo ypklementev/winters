@@ -23,6 +23,7 @@ sim::UserSettings LoadSettings() {
     s.wiperX = ReadInt(d, @"WiperX", 0);
     s.wiperY = ReadInt(d, @"WiperY", 0);
     s.unlimited = ReadInt(d, @"Unlimited", 0) != 0;
+    s.ezMode = ReadInt(d, @"EZMode", 0) != 0;
     return sim::sanitize(s);
 }
 
@@ -36,6 +37,7 @@ void SaveSettings(const sim::UserSettings& s) {
     [d setInteger:s.wiperX forKey:@"WiperX"];
     [d setInteger:s.wiperY forKey:@"WiperY"];
     [d setInteger:s.unlimited ? 1 : 0 forKey:@"Unlimited"];
+    [d setInteger:s.ezMode ? 1 : 0 forKey:@"EZMode"];
 }
 
 LoginItemState GetLoginItemState() {

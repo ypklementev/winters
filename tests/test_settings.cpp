@@ -48,3 +48,10 @@ TEST(settings_unlimited_mode_maps_to_config) {
     CHECK(!normal.unlimited);
     CHECK(c.maxFlakes > normal.maxFlakes);
 }
+
+TEST(settings_ez_mode_maps_to_config) {
+    UserSettings s;
+    CHECK(!toSnowConfig(s).onlyWindows);
+    s.ezMode = true;
+    CHECK(toSnowConfig(s).onlyWindows);
+}

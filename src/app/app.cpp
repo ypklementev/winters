@@ -49,6 +49,7 @@ enum MenuId : UINT {
     kMenuShovel = 140,
     kMenuWiper = 145,
     kMenuUnlimited = 146,
+    kMenuEzMode = 147,
     kMenuAutostart = 151,
     kMenuHelp = 160,
     kMenuAuthor = 161,
@@ -336,6 +337,8 @@ void App::showTrayMenu(POINT at) {
     AppendMenuW(snow, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(snow, MF_STRING | (settings_.unlimited ? MF_CHECKED : 0u), kMenuUnlimited,
                 L"Без ограничений (сугробы до верха экрана)");
+    AppendMenuW(snow, MF_STRING | (settings_.ezMode ? MF_CHECKED : 0u), kMenuEzMode,
+                L"EZ-режим (снег только на окнах)");
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(snow), L"Снегопад");
 
     AppendMenuW(wind, MF_STRING, kMenuWindCalm, L"Штиль");
@@ -421,6 +424,9 @@ void App::showTrayMenu(POINT at) {
             break;
         case kMenuUnlimited:
             settings_.unlimited = !settings_.unlimited;
+            break;
+        case kMenuEzMode:
+            settings_.ezMode = !settings_.ezMode;
             break;
         case kMenuWiper:
             settings_.wiper = !settings_.wiper;
