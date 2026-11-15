@@ -155,3 +155,42 @@ TEST(snowball_held_ball_is_immovable) {
     CHECK(balls[0].pos.x == 0.0f && balls[0].pos.y == 0.0f);
     CHECK(balls[1].pos.x >= 19.9f);
 }
+
+namespace {
+// Rolls a ball on window 1 and drops it at `drop` (pointer released there).
+void makeBallAndDrop(World& w, Vec2 drop) {
+    const float line = th::findSurface(w, 1)->lineAt(300);
+    movePointer(w, {300, line - 2}, {300, line - 2}, 0.05f, true, true);
+    movePointer(w, {300, line}, {700, line}, 1.0f, true, true);
+    movePointer(w, {700, line}, drop, 0.5f, true, true);
+    movePointer(w, drop, drop, 0.05f, false, false);
+    th::runSeconds(w, 2.0f);
+}
+}  // namespace
+
+TEST(snowball_ignores_cursor_swipes) {
+    World w = snowyWindow(31);
+    makeBallAndDrop(w, {700, 250});
+    REQUIRE(w.snowballs().size() == 1);
+    const Vec2 before = w.snowballs()[0].pos;
+    const float y = before.y;
+    // A very fast swipe straight through it (no Ctrl+Alt, no button).
+    movePointer(w, {before.x - 300, y}, {before.x + 300, y}, 0.1f, false, false);
+    th::runSeconds(w, 1.0f);
+    REQUIRE(w.snowballs().size() == 1);
+    CHECK_NEAR(w.snowballs()[0].pos.x, before.x, 0.5);
+    CHECK_NEAR(w.snowballs()[0].pos.y, before.y, 0.5);
+}
+
+TEST(snowball_rests_on_screen_bottom_in_ez_mode) {
+    World w = snowyWindow(32);
+    SnowConfig cfg = w.config();
+    cfg.onlyWindows = true;
+    w.setConfig(cfg);
+    makeBallAndDrop(w, {1150, 700});
+    REQUIRE(w.snowballs().size() == 1);
+    const Snowball& b = w.snowballs()[0];
+    CHECK_NEAR(b.pos.y + b.radius, 800.0, 1.0);
+    CHECK(length(b.vel) < 1.0f);
+    CHECK(th::groundArea(w) == 0.0f);
+}

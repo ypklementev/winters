@@ -20,12 +20,17 @@ struct UserSettings {
     int wiperX = 0;            // pivot, physical screen px
     int wiperY = 0;
     bool unlimited = false;    // "Без ограничений": piles grow up to the screen top
+    bool ezMode = false;       // "EZ-режим": snow lies only on windows
+    GarlandColors garland = GarlandColors::Off;
+    GarlandBlink garlandBlink = GarlandBlink::Twinkle;
 };
 
 inline UserSettings sanitize(UserSettings s) {
     s.intensity = static_cast<Intensity>(std::clamp(static_cast<int>(s.intensity), 0, 2));
     s.windDirection = static_cast<WindDirection>(std::clamp(static_cast<int>(s.windDirection), 0, 2));
     s.windStrength = std::clamp(s.windStrength, 1, 3);
+    s.garland = static_cast<GarlandColors>(std::clamp(static_cast<int>(s.garland), 0, 3));
+    s.garlandBlink = static_cast<GarlandBlink>(std::clamp(static_cast<int>(s.garlandBlink), 0, 2));
     return s;
 }
 
@@ -61,12 +66,18 @@ inline SnowConfig toSnowConfig(const UserSettings& in) {
         c.unlimited = true;
         c.maxFlakes *= 3;
     }
+    c.onlyWindows = s.ezMode;
     static constexpr float kStrength[] = {0.0f, 25.0f, 60.0f, 120.0f};
     const float speed = kStrength[s.windStrength];
     c.wind = s.windDirection == WindDirection::Left    ? -speed
              : s.windDirection == WindDirection::Right ? speed
                                                        : 0.0f;
     return c;
+}
+
+inline GarlandConfig toGarlandConfig(const UserSettings& in) {
+    const UserSettings s = sanitize(in);
+    return {s.garland, s.garlandBlink};
 }
 
 }  // namespace sim

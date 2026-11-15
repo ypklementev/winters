@@ -195,7 +195,7 @@ fragment float4 ps_pile(PileOut i [[stage_in]], constant Frame& f [[buffer(1)]])
 // Solid shapes (wiper, snowman decorations):
 // a = (centre.x, centre.y, halfLength, halfWidth), b = (angle, r, g, b),
 // c = (alpha, shine, type, 0). type 0 = capsule, 1 = triangle pointing +x
-// (carrot), 2 = trapezoid narrower at the top (bucket). AA via signed distance.
+// (carrot), 2 = trapezoid narrower at the top (bucket), 3 = glow halo. AA via signed distance.
 // ---------------------------------------------------------------------------
 struct ShapeInstance {
     packed_float4 a;
@@ -234,6 +234,13 @@ fragment float4 ps_shape(ShapeOut i [[stage_in]], constant Frame& f [[buffer(1)]
     float hl = i.size.x, hw = i.size.y;
     float d;
     float3 col = i.color.rgb;
+    if (i.style.y > 2.5) {
+        // Glow (garland bulbs): a soft halo with little alpha, so it mostly
+        // adds light to whatever is underneath.
+        float g = saturate(1.0 - length(p) / max(hl, 0.001));
+        g = g * g * i.color.a;
+        return float4(col * g, g * 0.25);
+    }
     if (i.style.y < 0.5) {
         // Capsule with a cylindrical sheen across its width.
         float2 q = float2(max(abs(p.x) - (hl - hw), 0.0), p.y);

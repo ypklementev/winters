@@ -49,6 +49,14 @@ enum MenuId : UINT {
     kMenuShovel = 140,
     kMenuWiper = 145,
     kMenuUnlimited = 146,
+    kMenuEzMode = 147,
+    kMenuGarlandOff = 170,
+    kMenuGarlandMulti,
+    kMenuGarlandWarm,
+    kMenuGarlandBlue,
+    kMenuBlinkSteady = 175,
+    kMenuBlinkTwinkle,
+    kMenuBlinkChase,
     kMenuAutostart = 151,
     kMenuHelp = 160,
     kMenuAuthor = 161,
@@ -134,6 +142,7 @@ void App::onDeviceLost() {
 void App::applySettings() {
     settings_ = sim::sanitize(settings_);
     world_.setConfig(sim::toSnowConfig(settings_));
+    world_.setGarlandConfig(sim::toGarlandConfig(settings_));
 }
 
 // ============================================================================
@@ -297,7 +306,7 @@ void App::showHelp() {
     SetTimer(control_, kTimerModalTick, 15, nullptr);
     MessageBoxW(nullptr,
                 L"Снег падает и копится на верхних краях окон, на панели задач и внизу экрана.\n\n"
-                L"• Смахнуть снег — проведите курсором по сугробу (быстрый взмах сбивает и снежки).\n\n"
+                L"• Смахнуть снег — проведите курсором по сугробу. Снежки курсор не задевает: их можно только взять мышкой.\n\n"
                 L"• Снежный ком — зажмите Ctrl + левый Alt и ведите курсор вдоль сугроба: снег сгребается "
                 L"в шарик, который катится перед курсором и растёт. Можно и нажать на сугроб с Ctrl + Alt "
                 L"и катить снежок мышкой.\n\n"
@@ -305,7 +314,8 @@ void App::showHelp() {
                 L"шары слипаются, лепить можно сколько угодно шаров. Три шара от большого к маленькому — и снеговик получит ведро, морковку и глаза. "
                 L"За нижний шар можно унести весь снеговик.\n\n"
                 L"• Шар, брошенный или упавший с высоты, разбивается.\n\n"
-                L"• «Снегопад → Без ограничений» — сугробы растут хоть до верха экрана.\n\n"
+                L"• «Снегопад → Без ограничений» — сугробы растут хоть до верха экрана. «EZ-режим» — снег лежит только на окнах.\n\n"
+                L"• «Гирлянды» в меню развешивают огоньки по верхним краям окон.\n\n"
                 L"• Дворник (в меню) смахивает снег. Его ось можно перетащить мышкой.\n\n"
                 L"• Ctrl + Alt + S — пауза / продолжить.\n\n"
                 L"• «Лопата» в меню убирает весь снег.\n\n"
@@ -318,6 +328,7 @@ void App::showTrayMenu(POINT at) {
     HMENU menu = CreatePopupMenu();
     HMENU snow = CreatePopupMenu();
     HMENU wind = CreatePopupMenu();
+    HMENU lights = CreatePopupMenu();
 
     std::wstring title = L"WinTers";
     if (pauseReasons_ & kPauseBattery) title += L" — пауза (энергосбережение)";
@@ -336,6 +347,8 @@ void App::showTrayMenu(POINT at) {
     AppendMenuW(snow, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(snow, MF_STRING | (settings_.unlimited ? MF_CHECKED : 0u), kMenuUnlimited,
                 L"Без ограничений (сугробы до верха экрана)");
+    AppendMenuW(snow, MF_STRING | (settings_.ezMode ? MF_CHECKED : 0u), kMenuEzMode,
+                L"EZ-режим (снег только на окнах)");
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(snow), L"Снегопад");
 
     AppendMenuW(wind, MF_STRING, kMenuWindCalm, L"Штиль");
@@ -351,6 +364,21 @@ void App::showTrayMenu(POINT at) {
     CheckMenuRadioItem(wind, kMenuWindWeak, kMenuWindStrong,
                        kMenuWindWeak + static_cast<UINT>(settings_.windStrength - 1), MF_BYCOMMAND);
     AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(wind), L"Ветер");
+
+    AppendMenuW(lights, MF_STRING, kMenuGarlandOff, L"Выключены");
+    AppendMenuW(lights, MF_STRING, kMenuGarlandMulti, L"Разноцветные");
+    AppendMenuW(lights, MF_STRING, kMenuGarlandWarm, L"Тёплые");
+    AppendMenuW(lights, MF_STRING, kMenuGarlandBlue, L"Голубые");
+    AppendMenuW(lights, MF_SEPARATOR, 0, nullptr);
+    const UINT blinkFlags = settings_.garland == sim::GarlandColors::Off ? MF_GRAYED : 0u;
+    AppendMenuW(lights, MF_STRING | blinkFlags, kMenuBlinkSteady, L"Ровный свет");
+    AppendMenuW(lights, MF_STRING | blinkFlags, kMenuBlinkTwinkle, L"Мерцание");
+    AppendMenuW(lights, MF_STRING | blinkFlags, kMenuBlinkChase, L"Бегущие огни");
+    CheckMenuRadioItem(lights, kMenuGarlandOff, kMenuGarlandBlue,
+                       kMenuGarlandOff + static_cast<UINT>(settings_.garland), MF_BYCOMMAND);
+    CheckMenuRadioItem(lights, kMenuBlinkSteady, kMenuBlinkChase,
+                       kMenuBlinkSteady + static_cast<UINT>(settings_.garlandBlink), MF_BYCOMMAND);
+    AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(lights), L"Гирлянды");
 
     AppendMenuW(menu, MF_STRING | (settings_.wiper ? MF_CHECKED : 0u), kMenuWiper, L"Дворник");
     AppendMenuW(menu, MF_STRING, kMenuShovel, L"Лопата: убрать весь снег");
@@ -421,6 +449,20 @@ void App::showTrayMenu(POINT at) {
             break;
         case kMenuUnlimited:
             settings_.unlimited = !settings_.unlimited;
+            break;
+        case kMenuEzMode:
+            settings_.ezMode = !settings_.ezMode;
+            break;
+        case kMenuGarlandOff:
+        case kMenuGarlandMulti:
+        case kMenuGarlandWarm:
+        case kMenuGarlandBlue:
+            settings_.garland = static_cast<sim::GarlandColors>(cmd - kMenuGarlandOff);
+            break;
+        case kMenuBlinkSteady:
+        case kMenuBlinkTwinkle:
+        case kMenuBlinkChase:
+            settings_.garlandBlink = static_cast<sim::GarlandBlink>(cmd - kMenuBlinkSteady);
             break;
         case kMenuWiper:
             settings_.wiper = !settings_.wiper;

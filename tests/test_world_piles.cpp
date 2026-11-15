@@ -196,3 +196,25 @@ TEST(rounded_corners_hold_no_snow) {
     }
     CHECK(middle > 1.0f);
 }
+
+TEST(piles_ez_mode_snow_only_on_windows) {
+    World w(21);
+    th::heavySnow(w);
+    w.setMonitors({makeMonitor(0, 0, 1000, 800), makeMonitor(1000, 0, 2000, 800)});
+    w.setWindows({makeWindow(1, 1200, 400, 1800, 700), makeWindow(7, 0, 752, 1000, 800, true)});
+    th::runSeconds(w, 45.0f);
+    REQUIRE(th::groundArea(w) > 100.0f);
+    REQUIRE(th::findSurface(w, 7)->pile.totalArea() > 100.0f);
+
+    // Turning EZ mode on drops what lies at the bottom; nothing new collects there.
+    SnowConfig cfg = w.config();
+    cfg.onlyWindows = true;
+    w.setConfig(cfg);
+    CHECK(th::groundArea(w) == 0.0f);
+    CHECK(th::findSurface(w, 7)->pile.totalArea() == 0.0f);
+    const float onWindow = th::findSurface(w, 1)->pile.totalArea();
+    th::runSeconds(w, 30.0f);
+    CHECK(th::groundArea(w) == 0.0f);
+    CHECK(th::findSurface(w, 7)->pile.totalArea() == 0.0f);
+    CHECK(th::findSurface(w, 1)->pile.totalArea() > onWindow);
+}

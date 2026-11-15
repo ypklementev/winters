@@ -45,7 +45,6 @@ constexpr float kWakeReach = 3.5f;        // air wake radius, in mitten radii
 constexpr float kWakeStrength = 0.35f;
 constexpr float kFlingSpeed = 1400.0f;    // faster swipes fling snow; slower ones push it into a ball
 constexpr float kPlowStartMass = 65.0f;   // pushed snow needed before a ball appears
-constexpr float kKickSpeed = 900.0f;      // without Ctrl+Alt only a swipe this fast knocks a ball
 constexpr float kPlowForget = 0.6f;       // s without pushing before gathered snow is dropped
 constexpr float kPushMemory = 0.3f;       // s a ball counts as "being pushed"
 
@@ -83,7 +82,14 @@ World::World(std::uint64_t seed) : flakes_(cfg_.maxFlakes + kDebrisReserve), rng
 // ============================================================================
 
 void World::setConfig(const SnowConfig& cfg) {
+    const bool ezTurnedOn = cfg.onlyWindows && !cfg_.onlyWindows;
     cfg_ = cfg;
+    if (ezTurnedOn) {
+        // What already lies at the bottom of the screens falls away.
+        for (Surface& s : surfaces_) {
+            if (!holdsSnow(s)) collapseAll(s, {});
+        }
+    }
     const std::size_t cap = cfg_.maxFlakes + kDebrisReserve;
     if (flakes_.capacity() != cap) flakes_.setCapacity(cap);
 }
@@ -482,6 +488,7 @@ void World::landFlakes() {
             for (std::uint32_t si : index_.at(x)) {
                 // Cheap reject: the snow line lies within [edge - maxPile, edge].
                 const Surface& cand = surfaces_[si];
+                if (!holdsSnow(cand)) continue;
                 const float edge = cand.rect.top;
                 if (y0 > edge || y1 < edge - pileCap(cand)) continue;
                 const float line = cand.lineAt(x);
@@ -596,8 +603,8 @@ void World::erodePiles(float dt) {
 void World::applyMitten() {
     if (!pointer_.valid || holdingSomething()) return;
     if (time_ - lastPlowTime_ > kPlowForget) plowCarry_ = 0.0f;
-    // Two hands: normally the cursor brushes snow off and leaves snowballs
-    // alone (so they can be hovered and grabbed); with Ctrl+Alt it's a plow
+    // Two hands: normally the cursor brushes snow off and passes through
+    // snowballs (they move only when grabbed); with Ctrl+Alt it's a plow
     // that pushes snow into balls and shoves balls around.
     const bool plowMode = pointer_.sculpt;
     const Vec2 b = pointer_.pos;
@@ -613,33 +620,27 @@ void World::applyMitten() {
         return length(p - (a + seg * t));
     };
 
+    // Without Ctrl+Alt the cursor passes through balls: they and snowmen
+    // move only when grabbed.
     for (Snowball& ball : balls_) {
-        if (ball.held) continue;
-        if (plowMode) {
-            // Solid pusher (only while moving, so a ball just let go of isn't
-            // shoved away by the resting cursor). Touching any ball of a glued
-            // cluster pushes the whole cluster through its root.
-            if (speed < kMittenMinSpeed * scale) continue;
-            const Vec2 off = ball.pos - b;
-            const float dist = length(off);
-            const float minD = R + ball.radius;
-            if (dist >= minD || dist < 1e-3f) continue;
-            const Vec2 n = off * (1.0f / dist);
-            Snowball& root = balls_[static_cast<std::size_t>(rootOf(static_cast<std::size_t>(&ball - balls_.data())))];
-            if (root.held) continue;
-            root.pos = root.pos + (b + n * minD - ball.pos);
-            if (&root != &ball) ball.pos = b + n * minD;
-            const float vn = dot(pointer_.vel - root.vel, n);
-            if (vn > 0.0f) root.vel = root.vel + n * vn;
-            root.pushedAt = time_;
-            root.stillTime = 0.0f;
-        } else {
-            // Only a real swipe through a ball knocks it (and off a stack).
-            if (speed < kKickSpeed * scale || distToSeg(ball.pos) > R + ball.radius) continue;
-            ball.parent = 0;
-            const float k = std::clamp(12.0f * scale / ball.radius, 0.05f, 0.6f);
-            ball.vel = ball.vel + (pointer_.vel - ball.vel) * k;
-        }
+        if (ball.held || !plowMode) continue;
+        // Solid pusher (only while moving, so a ball just let go of isn't
+        // shoved away by the resting cursor). Touching any ball of a glued
+        // cluster pushes the whole cluster through its root.
+        if (speed < kMittenMinSpeed * scale) continue;
+        const Vec2 off = ball.pos - b;
+        const float dist = length(off);
+        const float minD = R + ball.radius;
+        if (dist >= minD || dist < 1e-3f) continue;
+        const Vec2 n = off * (1.0f / dist);
+        Snowball& root = balls_[static_cast<std::size_t>(rootOf(static_cast<std::size_t>(&ball - balls_.data())))];
+        if (root.held) continue;
+        root.pos = root.pos + (b + n * minD - ball.pos);
+        if (&root != &ball) ball.pos = b + n * minD;
+        const float vn = dot(pointer_.vel - root.vel, n);
+        if (vn > 0.0f) root.vel = root.vel + n * vn;
+        root.pushedAt = time_;
+        root.stillTime = 0.0f;
         ball.pushedAt = time_;
         ball.stillTime = 0.0f;
     }
@@ -1310,6 +1311,11 @@ void World::step(float dt) {
     stepBalls(dt);
     relaxPiles();
     erodePiles(dt);
+    if (garlandCfg_.enabled()) {
+        garlands_.update(dt, surfaces_, windNow_);
+    } else {
+        garlands_.clear();
+    }
     prevPointer_ = pointer_.pos;
     havePrevPointer_ = pointer_.valid;
 }

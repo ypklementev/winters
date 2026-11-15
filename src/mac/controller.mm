@@ -40,6 +40,14 @@ enum MenuId : NSInteger {
     kMenuShovel = 140,
     kMenuWiper = 145,
     kMenuUnlimited = 146,
+    kMenuEzMode = 147,
+    kMenuGarlandOff = 170,
+    kMenuGarlandMulti,
+    kMenuGarlandWarm,
+    kMenuGarlandBlue,
+    kMenuBlinkSteady = 175,
+    kMenuBlinkTwinkle,
+    kMenuBlinkChase,
     kMenuLoginItem = 151,
     kMenuHelp = 160,
     kMenuAuthor = 161,
@@ -327,6 +335,7 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
 - (void)applySettings {
     _settings = sim::sanitize(_settings);
     _world.setConfig(sim::toSnowConfig(_settings));
+    _world.setGarlandConfig(sim::toGarlandConfig(_settings));
 }
 
 // ============================================================================
@@ -488,6 +497,7 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
     [snow addItem:[self radio:@"Метель" tag:kMenuBlizzard on:_settings.intensity == sim::Intensity::Blizzard]];
     [snow addItem:NSMenuItem.separatorItem];
     [snow addItem:[self radio:@"Без ограничений (сугробы до верха экрана)" tag:kMenuUnlimited on:_settings.unlimited]];
+    [snow addItem:[self radio:@"EZ-режим (снег только на окнах)" tag:kMenuEzMode on:_settings.ezMode]];
     NSMenuItem* snowItem = [[NSMenuItem alloc] initWithTitle:@"Снегопад" action:nil keyEquivalent:@""];
     snowItem.submenu = snow;
     [menu addItem:snowItem];
@@ -508,6 +518,23 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
     NSMenuItem* windItem = [[NSMenuItem alloc] initWithTitle:@"Ветер" action:nil keyEquivalent:@""];
     windItem.submenu = wind;
     [menu addItem:windItem];
+
+    NSMenu* lights = [NSMenu new];
+    lights.autoenablesItems = NO;
+    NSString* colorTitles[] = {@"Выключены", @"Разноцветные", @"Тёплые", @"Голубые"};
+    for (int i = 0; i < 4; ++i) {
+        [lights addItem:[self radio:colorTitles[i] tag:kMenuGarlandOff + i on:static_cast<int>(_settings.garland) == i]];
+    }
+    [lights addItem:NSMenuItem.separatorItem];
+    NSString* blinkTitles[] = {@"Ровный свет", @"Мерцание", @"Бегущие огни"};
+    for (int i = 0; i < 3; ++i) {
+        NSMenuItem* it = [self radio:blinkTitles[i] tag:kMenuBlinkSteady + i on:static_cast<int>(_settings.garlandBlink) == i];
+        it.enabled = _settings.garland != sim::GarlandColors::Off;
+        [lights addItem:it];
+    }
+    NSMenuItem* lightsItem = [[NSMenuItem alloc] initWithTitle:@"Гирлянды" action:nil keyEquivalent:@""];
+    lightsItem.submenu = lights;
+    [menu addItem:lightsItem];
 
     [menu addItem:[self radio:@"Дворник" tag:kMenuWiper on:_settings.wiper]];
     [menu addItem:[self item:@"Лопата: убрать весь снег" tag:kMenuShovel]];
@@ -568,6 +595,20 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
         case kMenuUnlimited:
             _settings.unlimited = !_settings.unlimited;
             break;
+        case kMenuEzMode:
+            _settings.ezMode = !_settings.ezMode;
+            break;
+        case kMenuGarlandOff:
+        case kMenuGarlandMulti:
+        case kMenuGarlandWarm:
+        case kMenuGarlandBlue:
+            _settings.garland = static_cast<sim::GarlandColors>(cmd - kMenuGarlandOff);
+            break;
+        case kMenuBlinkSteady:
+        case kMenuBlinkTwinkle:
+        case kMenuBlinkChase:
+            _settings.garlandBlink = static_cast<sim::GarlandBlink>(cmd - kMenuBlinkSteady);
+            break;
         case kMenuWiper:
             _settings.wiper = !_settings.wiper;
             [self placeWiper];
@@ -615,7 +656,7 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
     alert.messageText = @"WinTers — как пользоваться";
     alert.informativeText =
         @"Снег падает и копится на верхних краях окон и внизу экрана, за Dock.\n\n"
-        @"• Смахнуть снег — проведите курсором по сугробу (быстрый взмах сбивает и снежки).\n\n"
+        @"• Смахнуть снег — проведите курсором по сугробу. Снежки курсор не задевает: их можно только взять мышкой.\n\n"
         @"• Снежный ком — зажмите Control + Option и ведите курсор вдоль сугроба: снег сгребается "
         @"в шарик, который катится перед курсором и растёт. Можно и нажать на сугроб с Control + Option "
         @"и катить снежок мышкой.\n\n"
@@ -623,7 +664,8 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
         @"шары слипаются, лепить можно сколько угодно шаров. Три шара от большого к маленькому — и снеговик получит "
         @"ведро, морковку и глаза. За нижний шар можно унести весь снеговик.\n\n"
         @"• Шар, брошенный или упавший с высоты, разбивается.\n\n"
-        @"• «Снегопад → Без ограничений» — сугробы растут хоть до верха экрана.\n\n"
+        @"• «Снегопад → Без ограничений» — сугробы растут хоть до верха экрана. «EZ-режим» — снег лежит только на окнах.\n\n"
+        @"• «Гирлянды» в меню развешивают огоньки по верхним краям окон.\n\n"
         @"• Дворник (в меню) смахивает снег. Его ось можно перетащить мышкой.\n\n"
         @"• Control + Option + S — пауза / продолжить.\n\n"
         @"• «Лопата» в меню убирает весь снег.\n\n"

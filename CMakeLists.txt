@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 if(CMAKE_HOST_APPLE AND NOT CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS version")
 endif()
-project(WinTers VERSION 0.1.1 LANGUAGES CXX)
+project(WinTers VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -30,6 +30,7 @@ endif()
 # ---------------------------------------------------------------------------
 add_library(winters_sim STATIC
     src/sim/flakes.cpp
+    src/sim/garlands.cpp
     src/sim/heightmap.cpp
     src/sim/surfaces.cpp
     src/sim/snowballs.cpp
@@ -181,6 +182,7 @@ if(WINTERS_BUILD_TESTS)
         tests/test_atlas.cpp
         tests/test_wiper_plow.cpp
         tests/test_instances.cpp
+        tests/test_garlands.cpp
     )
     target_link_libraries(sim_tests PRIVATE winters_render)
     target_include_directories(sim_tests PRIVATE tests)

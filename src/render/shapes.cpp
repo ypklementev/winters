@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 #include "sim/world.h"
 
@@ -13,10 +14,110 @@ Shape mk(float cx, float cy, float hl, float hw, float angle, float r, float g, 
          float type, float /*pad*/) {
     return {cx, cy, hl, hw, angle, r, g, b, alpha, shine, static_cast<int>(type)};
 }
+
+struct Rgb {
+    float r, g, b;
+};
+
+// Capsule from a to b (rounded ends included).
+void Capsule(std::vector<Shape>& out, sim::Vec2 a, sim::Vec2 b, float halfWidth, Rgb c, float shine, float alpha) {
+    const sim::Vec2 d = b - a;
+    const float half = sim::length(d) * 0.5f + halfWidth;
+    out.push_back(mk((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f, half, halfWidth, std::atan2(d.y, d.x), c.r, c.g, c.b,
+                     alpha, shine, kCapsule, 0.0f));
+}
+
+float Hash01(std::uint64_t x) {
+    x += 0x9E3779B97F4A7C15ull;
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+    x ^= x >> 31;
+    return static_cast<float>(x >> 40) / static_cast<float>(1ull << 24);
+}
+
+Rgb BulbColor(sim::GarlandColors colors, std::uint32_t index) {
+    static constexpr Rgb kMulti[] = {
+        {1.0f, 0.16f, 0.12f}, {0.16f, 0.86f, 0.30f}, {1.0f, 0.78f, 0.12f}, {0.22f, 0.45f, 1.0f}, {0.95f, 0.30f, 0.85f}};
+    switch (colors) {
+        case sim::GarlandColors::Warm:
+            return {1.0f, 0.76f, 0.42f};
+        case sim::GarlandColors::Blue:
+            return {0.42f, 0.70f, 1.0f};
+        default:
+            return kMulti[index % 5];
+    }
+}
+
+// 0..1: how lit a bulb is at time t.
+float BulbBrightness(sim::GarlandBlink blink, std::uint64_t windowId, std::uint32_t index, double t) {
+    constexpr float kTau = 6.2831853f;
+    switch (blink) {
+        case sim::GarlandBlink::Steady:
+            return 1.0f;
+        case sim::GarlandBlink::Twinkle: {
+            // Every bulb breathes at its own pace.
+            const std::uint64_t key = windowId * 0x100000001B3ull ^ index;
+            const float freq = 0.25f + 0.55f * Hash01(key);
+            const float phase = kTau * Hash01(key ^ 0xABCDEFull);
+            const float w = static_cast<float>(std::fmod(t * freq, 1.0)) * kTau + phase;
+            const float v = 0.5f + 0.5f * std::sin(w);
+            return 0.12f + 0.88f * v * std::sqrt(v);
+        }
+        case sim::GarlandBlink::Chase: {
+            // Running lights: a wave travels along the window from left to right.
+            const float pos = static_cast<float>(index) / 5.0f - static_cast<float>(std::fmod(t * 1.1, 1000.0));
+            const float v = 0.5f + 0.5f * std::cos(kTau * pos);
+            return 0.12f + 0.88f * v * v * v;
+        }
+    }
+    return 1.0f;
+}
+
+void BuildGarlands(const sim::World& world, std::vector<Shape>& out) {
+    const sim::GarlandConfig cfg = world.garlandConfig();
+    if (!cfg.enabled()) return;
+    constexpr Rgb kWire{0.06f, 0.15f, 0.08f};
+    constexpr Rgb kSocket{0.10f, 0.22f, 0.12f};
+    constexpr int kWireSegments = 8;
+    const double t = world.time();
+    std::vector<Shape> glows;
+    for (const sim::Festoon& f : world.festoons()) {
+        const float s = f.scale;
+        for (int k = 0; k < kWireSegments; ++k) {
+            const float u0 = static_cast<float>(k) / kWireSegments, u1 = static_cast<float>(k + 1) / kWireSegments;
+            Capsule(out, f.at(u0), f.at(u1), 0.75f * s, kWire, 0.15f, 1.0f);
+        }
+        for (int k = 0; k < f.bulbs; ++k) {
+            const std::uint32_t index = f.firstBulb + static_cast<std::uint32_t>(k);
+            const sim::Vec2 p = f.at((static_cast<float>(k) + 0.5f) / static_cast<float>(f.bulbs));
+            // Bulbs hang a little crooked and swing a bit further than the wire.
+            const float tilt = (Hash01(f.windowId ^ (index * 7919ull)) - 0.5f) * 0.5f + f.swing * 1.15f;
+            const sim::Vec2 d{std::sin(tilt), std::cos(tilt)};
+            const float angle = std::atan2(d.y, d.x);
+            const Rgb c = BulbColor(cfg.colors, index);
+            const float br = BulbBrightness(cfg.blink, f.windowId, index, t);
+            const sim::Vec2 socket = p + d * (2.2f * s);
+            const sim::Vec2 bulb = p + d * (8.0f * s);
+            out.push_back(mk(socket.x, socket.y, 2.2f * s, 1.7f * s, angle, kSocket.r, kSocket.g, kSocket.b, 1.0f,
+                             0.3f, kCapsule, 0.0f));
+            const float lit = 0.3f + 0.75f * br;
+            out.push_back(mk(bulb.x, bulb.y, 4.6f * s, 2.8f * s, angle, c.r * lit, c.g * lit, c.b * lit, 1.0f,
+                             0.25f + 0.45f * br, kCapsule, 0.0f));
+            if (br > 0.05f) {
+                const float r = (9.0f + 6.0f * br) * s;
+                glows.push_back(mk(bulb.x, bulb.y, r, r, 0.0f, c.r, c.g, c.b, 0.6f * br, 0.0f, kGlow, 0.0f));
+            }
+        }
+    }
+    // Halos last, so a bulb also lights its neighbours' glass and the snow.
+    out.insert(out.end(), glows.begin(), glows.end());
+}
+
 }  // namespace
 
 std::vector<Shape> Build(const sim::World& world) {
     std::vector<Shape> out;
+    BuildGarlands(world, out);
     // Snowman decorations pop in when the third ball settles: bucket hat,
     // carrot nose, button eyes, coal smile, buttons and twig arms.
     for (const sim::Snowman& m : world.snowmen()) {
