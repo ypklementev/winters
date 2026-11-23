@@ -20,6 +20,7 @@ namespace {
 
 enum PauseReason : unsigned {
     kPauseUser = 1u << 0,
+    kPauseFullscreen = 1u << 1,
     kPauseLowPower = 1u << 2,
     kPauseLocked = 1u << 3,
     kPauseSuspended = 1u << 4,
@@ -41,6 +42,7 @@ enum MenuId : NSInteger {
     kMenuWiper = 145,
     kMenuUnlimited = 146,
     kMenuEzMode = 147,
+    kMenuPauseFullscreen = 150,
     kMenuGarlandOff = 170,
     kMenuGarlandMulti,
     kMenuGarlandWarm,
@@ -80,6 +82,7 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
     id _displayLink;  // CADisplayLink (macOS 14+)
     NSTimer* _timer;  // fallback on macOS 13
     NSTimer* _rebuildTimer;
+    NSTimer* _autoPauseTimer;  // polls for a full-screen app, also while paused
     double _lastTick;
     double _startTime;
     double _accumulator;
@@ -120,6 +123,14 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
     [self observeSystem];
 
     [self rebuildDisplays];
+    __weak WTController* weakTimerSelf = self;
+    _autoPauseTimer = [NSTimer timerWithTimeInterval:0.5
+                                             repeats:YES
+                                               block:^(NSTimer*) {
+                                                 [weakTimerSelf checkFullscreen];
+                                               }];
+    _autoPauseTimer.tolerance = 0.1;
+    [NSRunLoop.mainRunLoop addTimer:_autoPauseTimer forMode:NSRunLoopCommonModes];
     [self checkAutoPause];
     [self updateTooltip];
     _lastTick = CACurrentMediaTime();
@@ -128,6 +139,8 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
 
 - (void)applicationWillTerminate:(NSNotification*)note {
     [self stopTicking];
+    [_autoPauseTimer invalidate];
+    _autoPauseTimer = nil;
     _hotkey.unregister();
     for (WTOverlay* o in _overlays) [o close];
     [_overlays removeAllObjects];
@@ -375,12 +388,21 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
 
 - (void)checkAutoPause {
     [self setPaused:kPauseLowPower on:NSProcessInfo.processInfo.lowPowerModeEnabled];
+    [self checkFullscreen];
+}
+
+- (void)checkFullscreen {
+    // While our own help alert is in front, keep whatever was decided before.
+    if (_settings.pauseFullscreen && NSApp.isActive && (_pauseReasons & kPauseFullscreen)) return;
+    const bool on = _settings.pauseFullscreen && IsFullscreenAppFrontmost();
+    if (on != static_cast<bool>(_pauseReasons & kPauseFullscreen)) [self setPaused:kPauseFullscreen on:on];
 }
 
 - (void)updateTooltip {
     NSString* state = !self.paused                        ? @"идёт снег"
                       : (_pauseReasons & kPauseUser)      ? @"пауза"
                       : (_pauseReasons & kPauseLowPower)  ? @"пауза: режим энергосбережения"
+                      : (_pauseReasons & kPauseFullscreen) ? @"пауза: полноэкранное приложение"
                                                           : @"пауза";
     _statusItem.button.toolTip = [@"WinTers — " stringByAppendingString:state];
     _statusItem.button.appearsDisabled = self.paused;
@@ -429,9 +451,11 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
     });
     on(ws, NSWorkspaceActiveSpaceDidChangeNotification, ^{
       [weakSelf windowsChanged];
+      [weakSelf checkFullscreen];
     });
     on(ws, NSWorkspaceDidActivateApplicationNotification, ^{
       [weakSelf windowsChanged];
+      [weakSelf checkFullscreen];
     });
     on(dc, @"com.apple.screenIsLocked", ^{
       [weakSelf setPaused:kPauseLocked on:true];
@@ -477,7 +501,9 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
     if (menu != _statusItem.menu) return;
     [menu removeAllItems];
 
-    NSString* title = (_pauseReasons & kPauseLowPower) ? @"WinTers — пауза (энергосбережение)" : @"WinTers";
+    NSString* title = (_pauseReasons & kPauseLowPower)     ? @"WinTers — пауза (энергосбережение)"
+                      : (_pauseReasons & kPauseFullscreen) ? @"WinTers — пауза (полноэкранное приложение)"
+                                                           : @"WinTers";
     NSMenuItem* header = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
     header.enabled = NO;
     [menu addItem:header];
@@ -540,6 +566,7 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
     [menu addItem:[self item:@"Лопата: убрать весь снег" tag:kMenuShovel]];
     [menu addItem:NSMenuItem.separatorItem];
 
+    [menu addItem:[self radio:@"Пауза в полноэкранных приложениях" tag:kMenuPauseFullscreen on:_settings.pauseFullscreen]];
     NSMenuItem* login = [self item:@"Открывать при входе в систему" tag:kMenuLoginItem];
     switch (GetLoginItemState()) {
         case LoginItemState::Enabled:
@@ -613,6 +640,10 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
             _settings.wiper = !_settings.wiper;
             [self placeWiper];
             break;
+        case kMenuPauseFullscreen:
+            _settings.pauseFullscreen = !_settings.pauseFullscreen;
+            [self checkFullscreen];
+            break;
         case kMenuLoginItem:
             switch (GetLoginItemState()) {
                 case LoginItemState::Enabled:
@@ -669,6 +700,8 @@ NSString* const kAuthorUrl = @"https://ypklementev.ru";
         @"• Дворник (в меню) смахивает снег. Его ось можно перетащить мышкой.\n\n"
         @"• Control + Option + S — пауза / продолжить.\n\n"
         @"• «Лопата» в меню убирает весь снег.\n\n"
+        @"• «Пауза в полноэкранных приложениях» — снег прячется, пока перед вами полноэкранная игра, видео или "
+        @"приложение во весь экран, и возвращается, когда вы из них выходите.\n\n"
         @"Автор: ypklementev.ru";
     [alert runModal];
 }

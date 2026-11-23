@@ -24,3 +24,8 @@ std::vector<MacWindow> QueryWindows();
 // API; it grew in macOS 26 (Tahoe), where windows with toolbars are rounder
 // still: those lose a little snow at the ends, which looks fine.
 double WindowCornerRadius();
+
+// The frontmost app (not us) has a visible window covering a whole display:
+// native full screen, a borderless game, a slideshow. Windows of apps in the
+// background don't count, nor do those on other Spaces.
+bool IsFullscreenAppFrontmost();

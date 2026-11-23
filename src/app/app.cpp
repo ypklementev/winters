@@ -32,7 +32,7 @@ enum TimerId : UINT_PTR {
     kTimerDisplay = 2,    // debounce display changes / resume
     kTimerRecover = 3,    // retry renderer creation after device loss
     kTimerModalTick = 4,  // keep animating while a menu/message box runs its modal loop
-    kTimerAutoPause = 5,  // poll battery saver state
+    kTimerAutoPause = 5,  // poll battery saver / full-screen app state
 };
 
 enum MenuId : UINT {
@@ -50,6 +50,7 @@ enum MenuId : UINT {
     kMenuWiper = 145,
     kMenuUnlimited = 146,
     kMenuEzMode = 147,
+    kMenuPauseFullscreen = 150,
     kMenuGarlandOff = 170,
     kMenuGarlandMulti,
     kMenuGarlandWarm,
@@ -282,6 +283,7 @@ void App::setPaused(unsigned reason, bool on) {
 
 void App::checkAutoPause() {
     setPaused(kPauseBattery, IsBatterySaverActive());
+    setPaused(kPauseFullscreen, settings_.pauseFullscreen && IsFullscreenAppForeground());
 }
 
 void App::updateTooltip() {
@@ -292,6 +294,8 @@ void App::updateTooltip() {
         tip += L"пауза";
     } else if (pauseReasons_ & kPauseBattery) {
         tip += L"пауза: режим энергосбережения";
+    } else if (pauseReasons_ & kPauseFullscreen) {
+        tip += L"пауза: полноэкранное приложение";
     } else {
         tip += L"пауза";
     }
@@ -319,6 +323,7 @@ void App::showHelp() {
                 L"• Дворник (в меню) смахивает снег. Его ось можно перетащить мышкой.\n\n"
                 L"• Ctrl + Alt + S — пауза / продолжить.\n\n"
                 L"• «Лопата» в меню убирает весь снег.\n\n"
+                L"• «Пауза в полноэкранных приложениях» — снег прячется, пока перед вами полноэкранная игра или видео, и возвращается, когда вы из них выходите.\n\n"
                 L"Автор: ypklementev.ru",
                 L"WinTers — как пользоваться", MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
     KillTimer(control_, kTimerModalTick);
@@ -332,6 +337,7 @@ void App::showTrayMenu(POINT at) {
 
     std::wstring title = L"WinTers";
     if (pauseReasons_ & kPauseBattery) title += L" — пауза (энергосбережение)";
+    else if (pauseReasons_ & kPauseFullscreen) title += L" — пауза (полноэкранное приложение)";
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, title.c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
@@ -383,6 +389,8 @@ void App::showTrayMenu(POINT at) {
     AppendMenuW(menu, MF_STRING | (settings_.wiper ? MF_CHECKED : 0u), kMenuWiper, L"Дворник");
     AppendMenuW(menu, MF_STRING, kMenuShovel, L"Лопата: убрать весь снег");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING | (settings_.pauseFullscreen ? MF_CHECKED : 0u), kMenuPauseFullscreen,
+                L"Пауза в полноэкранных приложениях");
     UINT autostartFlags = MF_STRING;
     const wchar_t* autostartText = L"Запускать вместе с Windows";
     switch (GetAutostartState()) {
@@ -467,6 +475,10 @@ void App::showTrayMenu(POINT at) {
         case kMenuWiper:
             settings_.wiper = !settings_.wiper;
             placeWiper();
+            break;
+        case kMenuPauseFullscreen:
+            settings_.pauseFullscreen = !settings_.pauseFullscreen;
+            checkAutoPause();
             break;
         case kMenuAutostart:
             SetAutostart(GetAutostartState() != AutostartState::Enabled);
@@ -655,7 +667,7 @@ int App::run(HINSTANCE instance) {
         return 1;
     }
     SetTimer(control_, kTimerTopmost, 2000, nullptr);
-    SetTimer(control_, kTimerAutoPause, 1000, nullptr);
+    SetTimer(control_, kTimerAutoPause, 500, nullptr);
     checkAutoPause();
     updateTooltip();
 
