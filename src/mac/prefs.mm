@@ -26,6 +26,7 @@ sim::UserSettings LoadSettings() {
     s.ezMode = ReadInt(d, @"EZMode", 0) != 0;
     s.garland = static_cast<sim::GarlandColors>(ReadInt(d, @"Garland", static_cast<int>(s.garland)));
     s.garlandBlink = static_cast<sim::GarlandBlink>(ReadInt(d, @"GarlandBlink", static_cast<int>(s.garlandBlink)));
+    s.pauseFullscreen = ReadInt(d, @"PauseFullscreen", 0) != 0;
     return sim::sanitize(s);
 }
 
@@ -42,6 +43,7 @@ void SaveSettings(const sim::UserSettings& s) {
     [d setInteger:s.ezMode ? 1 : 0 forKey:@"EZMode"];
     [d setInteger:static_cast<int>(s.garland) forKey:@"Garland"];
     [d setInteger:static_cast<int>(s.garlandBlink) forKey:@"GarlandBlink"];
+    [d setInteger:s.pauseFullscreen ? 1 : 0 forKey:@"PauseFullscreen"];
 }
 
 LoginItemState GetLoginItemState() {

@@ -68,6 +68,7 @@ sim::UserSettings LoadSettings() {
     s.ezMode = read(L"EZMode", 0) != 0;
     s.garland = static_cast<sim::GarlandColors>(read(L"Garland", static_cast<int>(s.garland)));
     s.garlandBlink = static_cast<sim::GarlandBlink>(read(L"GarlandBlink", static_cast<int>(s.garlandBlink)));
+    s.pauseFullscreen = read(L"PauseFullscreen", 0) != 0;
     s = sim::sanitize(s);
     if (migrate) SaveSettings(s);
     return s;
@@ -87,4 +88,5 @@ void SaveSettings(const sim::UserSettings& s) {
     WriteInt(path, L"EZMode", s.ezMode ? 1 : 0);
     WriteInt(path, L"Garland", static_cast<int>(s.garland));
     WriteInt(path, L"GarlandBlink", static_cast<int>(s.garlandBlink));
+    WriteInt(path, L"PauseFullscreen", s.pauseFullscreen ? 1 : 0);
 }

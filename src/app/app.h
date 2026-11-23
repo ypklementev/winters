@@ -25,6 +25,7 @@ public:
 private:
     enum PauseReason : unsigned {
         kPauseUser = 1u << 0,
+        kPauseFullscreen = 1u << 1,
         kPauseBattery = 1u << 2,
         kPauseLocked = 1u << 3,
         kPauseSuspended = 1u << 4,

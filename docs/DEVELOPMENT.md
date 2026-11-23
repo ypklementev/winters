@@ -131,6 +131,7 @@ Bundle ID задаётся в CMake (`WINTERS_MAC_BUNDLE_ID`, по умолча�
 - **Лепка:** Control + Option (любой Option: AltGr на маке нет). Пауза: Control + Option + S (Carbon `RegisterEventHotKey`).
 - **Автозапуск** через `SMAppService` («Открывать при входе в систему»). Если его выключили в «Системных настройках → Основные → Объекты входа», пункт меню ведёт туда.
 - **Автопауза:** режим энергосбережения (Low Power Mode), сон, погашенный экран, блокировка, переключение пользователя.
+- **Пауза в полноэкранных приложениях** (настройка `PauseFullscreen`): у активного приложения (не нашего) есть видимое окно, накрывающее весь дисплей (`IsFullscreenAppFrontmost`, опрос раз в 0,5 с и при смене приложения или Space). На Windows то же самое делает `IsFullscreenAppForeground`: окно переднего плана чужое, это не оболочка (рабочий стол, Alt+Tab, Task View), и его клиентская область накрывает весь монитор; развёрнутое окно с заголовком не считается. `SHQueryUserNotificationState` не используется: она принимала за полноэкранное приложение наш собственный оверлей, и снег мерцал.
 - **Шейдеры** — порт HLSL на Metal Shading Language (`src/mac/metal_shaders.h`). Они компилируются при запуске через `newLibraryWithSource`, поэтому компилятор `metal` из Xcode не нужен. **Правка шейдера на одной платформе требует такой же правки на другой.**
 
 ## Тесты симуляции
@@ -151,8 +152,8 @@ ctest --test-dir build/host --output-on-failure
 |---|---|---|
 | `windows-msvc` | общий код, `src/app`, `src/overlay`, `src/render`, `src/input`, `src/windows_tracker`, `build.ps1`, `cmake/`, MSIX-пакет | `build.ps1 -Target all -TestSign`, тесты, пробная установка MSIX; артефакты **WinTers-x64** и **WinTers-msix** |
 | `macos` | общий код, `src/mac`, `packaging/macos`, `build.sh`, `tools/mac_preview.mm` | `build.sh` (universal, ad-hoc подпись, тесты); артефакт **WinTers-macOS** (.dmg и .zip) |
-| `sim-tests-linux` | общий код | тесты симуляции с ASan/UBSan |
 
+Тесты симуляции идут в обоих jobs; с ASan/UBSan их стоит гонять локально (Linux-job убран ради минут бесплатного тарифа).
 Общий код — это `src/sim`, общая часть `src/render` (`instances`, `flake_atlas`, `shapes`), `tests/`, `CMakeLists.txt` и сам файл workflow.
 Правка README, `docs/`, `PRIVACY.md` или `tools/*.py` ничего не собирает. Пересобрать всё вручную: Actions → build → **Run workflow**.
 
@@ -192,7 +193,7 @@ WACK устанавливает пакет, поэтому ему нужна п�
 
 ## Публикация в Microsoft Store
 
-1. **Поднять версию** в `CMakeLists.txt`: `project(WinTers VERSION 1.0.1 ...)`. Store не принимает пакет с той же или меньшей версией, чем уже опубликованная.
+1. **Поднять версию** в `CMakeLists.txt`: `project(WinTers VERSION 1.1.1 ...)`. Store не принимает пакет с той же или меньшей версией, чем уже опубликованная.
 2. **Собрать:** `.\build.ps1 -TestSign`.
 3. **Проверить** по чек-листу выше и прогнать WACK на `_testsigned.msix`.
 4. **Загрузить** в Partner Center → WinTers (9PNZ9T3SS34X) → новая отправка → «Пакеты» файл `dist\WinTers_<версия>_x64.msix` (**неподписанный**, без `_testsigned`).

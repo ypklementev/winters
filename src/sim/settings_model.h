@@ -23,6 +23,7 @@ struct UserSettings {
     bool ezMode = false;       // "EZ-режим": snow lies only on windows
     GarlandColors garland = GarlandColors::Off;
     GarlandBlink garlandBlink = GarlandBlink::Twinkle;
+    bool pauseFullscreen = false;  // pause while a full-screen app is in front
 };
 
 inline UserSettings sanitize(UserSettings s) {
