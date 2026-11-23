@@ -25,7 +25,6 @@ jobs:
     outputs:
       windows: ${{ steps.filter.outputs.windows }}
       macos: ${{ steps.filter.outputs.macos }}
-      sim: ${{ steps.filter.outputs.sim }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -40,8 +39,6 @@ jobs:
               - src/render/shapes.*
               - src/render/instances.*
               - tests/**
-            sim:
-              - *shared
             windows:
               - *shared
               - build.ps1
@@ -122,14 +119,3 @@ jobs:
             dist/WinTers_*_macOS.zip
           if-no-files-found: error
 
-  sim-tests-linux:
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.sim == 'true') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build & test sim (ASan/UBSan)
-        run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined"
-          cmake --build build --parallel
-          ctest --test-dir build --output-on-failure

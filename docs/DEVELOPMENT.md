@@ -151,8 +151,8 @@ ctest --test-dir build/host --output-on-failure
 |---|---|---|
 | `windows-msvc` | общий код, `src/app`, `src/overlay`, `src/render`, `src/input`, `src/windows_tracker`, `build.ps1`, `cmake/`, MSIX-пакет | `build.ps1 -Target all -TestSign`, тесты, пробная установка MSIX; артефакты **WinTers-x64** и **WinTers-msix** |
 | `macos` | общий код, `src/mac`, `packaging/macos`, `build.sh`, `tools/mac_preview.mm` | `build.sh` (universal, ad-hoc подпись, тесты); артефакт **WinTers-macOS** (.dmg и .zip) |
-| `sim-tests-linux` | общий код | тесты симуляции с ASan/UBSan |
 
+Тесты симуляции идут в обоих jobs; с ASan/UBSan их стоит гонять локально (Linux-job убран ради минут бесплатного тарифа).
 Общий код — это `src/sim`, общая часть `src/render` (`instances`, `flake_atlas`, `shapes`), `tests/`, `CMakeLists.txt` и сам файл workflow.
 Правка README, `docs/`, `PRIVACY.md` или `tools/*.py` ничего не собирает. Пересобрать всё вручную: Actions → build → **Run workflow**.
 
